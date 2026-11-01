@@ -850,7 +850,8 @@
     const s = Math.max(SW / vw, SH / vh), ox = (SW - vw * s) / 2, oy = (SH - vh * s) / 2;   // object-fit: cover
     const toVid = (x, y) => [((SW / 2 + (x - SW / 2) / dz) - ox) / s, ((SH / 2 + (y - SH / 2) / dz) - oy) / s];
     const m = 0.08 * SH;
-    let [x0, y0] = toVid(0, Math.max(0, gapTop - m)), [x1, y1] = toVid(SW, Math.min(SH, gapBottom + m));
+    // The whole camera picture, including what's behind the text boxes: subtitles there must not be missed.
+    let [x0, y0] = toVid(0, 0), [x1, y1] = toVid(SW, SH);
     x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(vw, x1); y1 = Math.min(vh, y1);
     let sw = x1 - x0, sh = y1 - y0;
     if (sw < 40 || sh < 40) { x0 = 0; y0 = 0; sw = vw; sh = vh; }
@@ -866,9 +867,9 @@
   }
   // Same picture, but encoded in the background so the screen never stutters
   async function grabAsync() {
-    const c = cropRect(); if (!c) return null;
+    const c = cropRect(); if (!c) return null; window.__lastCrop = c;
     const { x0, y0, sw, sh } = c;
-    const k = Math.min(1, 1000 / Math.max(sw, sh));
+    const k = Math.min(1, 1280 / Math.max(sw, sh));
     const W = Math.round(sw * k), H = Math.round(sh * k);
     cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H);
     if (!cv.toBlob) return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
@@ -925,7 +926,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     if (a.length < 3 || b.length < 3) return false;
     const m = new Map(); for (let i = 0; i < a.length - 1; i++) { const g = a.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
     let hit = 0; for (let i = 0; i < b.length - 1; i++) { const g = b.substr(i, 2), c = m.get(g); if (c) { hit++; m.set(g, c - 1); } }
-    return 2 * hit / (a.length + b.length - 2) > 0.8;
+    return 2 * hit / (a.length + b.length - 2) > (S.engine === 'free' ? 0.62 : 0.8);
   }
 
   function parseAI(t, cost) {
@@ -998,7 +999,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       const sc = document.createElement('script');
       sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
       sc.onload = async () => {
-        try { const w = await Tesseract.createWorker('dan'); await w.setParameters({ tessedit_pageseg_mode: '3' }); ocr = w; setStatus(''); res(w); }
+        try { const w = await Tesseract.createWorker('dan'); await w.setParameters({ tessedit_pageseg_mode: '6' }); ocr = w; setStatus(''); res(w); }
         catch (e) { ocrLoading = null; rej(e); }
       };
       sc.onerror = () => { ocrLoading = null; rej(new Error('Could not load the text reader. Check your internet.')); };
@@ -1007,18 +1008,46 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return ocrLoading;
   }
   const ocv = document.createElement('canvas'), ocx = ocv.getContext('2d', { willReadFrequently: true });
+  // Otsu: the brightness cut-off that best splits this picture into two groups (letters vs. the rest)
+  function otsu(hist, total) {
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, best = 0, thr = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue; const wF = total - wB; if (!wF) break;
+      sumB += t * hist[t]; const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; thr = t; }
+    }
+    return thr;
+  }
   async function askFree() {
     const w = await loadOCR();
-    // keep only white/yellow subtitle-like pixels: they become black text on white
-    const W = cv.width, H = cv.height; ocv.width = W; ocv.height = H; ocx.drawImage(cv, 0, 0);
-    const img = ocx.getImageData(0, 0, W, H), d = img.data;
+    // 1. Where is the subtitle? Use the watcher's latest sighting; otherwise read the lower 45% of the picture.
+    const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return { lines: [], cost: 0 };
+    let x0, y0, x1, y1;
+    if (lastBand && Date.now() - lastBand.t < 2000) {
+      const bh = lastBand.y1 - lastBand.y0, bw = lastBand.x1 - lastBand.x0;
+      x0 = lastBand.x0 - Math.max(0.08 * bw, 2 * bh); x1 = lastBand.x1 + Math.max(0.08 * bw, 2 * bh);
+      y0 = lastBand.y0 - 0.8 * bh - 6; y1 = lastBand.y1 + 0.8 * bh + 6;
+    } else { const c = cropRect(); x0 = c.x0; x1 = c.x0 + c.sw; y0 = c.y0 + c.sh * 0.55; y1 = c.y0 + c.sh; }
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(vw, x1); y1 = Math.min(vh, y1);
+    const sw = x1 - x0, sh = y1 - y0; if (sw < 8 || sh < 4) return { lines: [], cost: 0 };
+    // 2. Enlarge so letters are ~40 px tall (the reader likes that), capped for speed.
+    const k = Math.max(1, Math.min(4, 1200 / sw, (lastBand ? 115 : 500) / sh));
+    const W = Math.round(sw * k), H = Math.round(sh * k);
+    ocv.width = W + 40; ocv.height = H + 40;
+    ocx.fillStyle = '#fff'; ocx.fillRect(0, 0, ocv.width, ocv.height);
+    ocx.imageSmoothingQuality = 'high'; ocx.drawImage(video, x0, y0, sw, sh, 20, 20, W, H);
+    // 3. Light letters → black on white, using a cut-off chosen from this strip only.
+    const img = ocx.getImageData(20, 20, W, H), d = img.data, hist = new Uint32Array(256);
+    for (let i = 0; i < d.length; i += 4) hist[(d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++;
+    const thr = Math.max(90, otsu(hist, W * H));
     for (let i = 0; i < d.length; i += 4) {
-      const R = d[i], G = d[i + 1], B = d[i + 2], lum = 0.299 * R + 0.587 * G + 0.114 * B;
+      const R = d[i], G = d[i + 1], B = d[i + 2], l = (R * 77 + G * 150 + B * 29) >> 8;
       const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
-      const txt = (lum > 175 && mx - mn < 70) || (R > 170 && G > 150 && B < 120);
+      const txt = l > thr && (mx - mn < 90 || (R > G * 0.9 && G > B * 1.3));            // light grey/white or yellow
       d[i] = d[i + 1] = d[i + 2] = txt ? 0 : 255;
     }
-    ocx.putImageData(img, 0, 0);
+    ocx.putImageData(img, 20, 20);
     let timer;
     const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timeout')), 12000); });
     let data;
@@ -1040,12 +1069,20 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     good.sort((a, b) => a.bbox.y1 - b.bbox.y1);
     const last = good[good.length - 1], lh = last.bbox.y1 - last.bbox.y0;
     const block = good.filter(l => l.bbox.y1 >= last.bbox.y0 - 2.6 * lh);
-    const raw = block.map(l => l.text.replace(/\|/g, 'I').replace(/\s+/g, ' ').trim());
+    // tidy up reader noise: stray marks at the edges, quote marks, lone letters after the sentence ends
+    const tidy = t => t.replace(/\|/g, 'I').replace(/[“”„"‘’`´]/g, '').replace(/\s+/g, ' ').trim()
+      .replace(/^[^\p{L}\d\-–]+/u, '')                                   // junk before the first letter (keeps speaker dash)
+      .replace(/([.?!…])[\s.,'’I|l1]*$/u, '$1')                           // ". I.." after the end of a sentence
+      .replace(/[^\p{L}\d.?!…,]+$/u, '')                                   // junk after the last letter
+      .replace(/(\s+[Iil1|.,']{1,2})+$/u, '')                              // lone reader marks at the end ("ned I I")
+      .replace(/^[Iil1|]\s+(?=\p{Lu})/u, '')                               // lone mark before the first word ("I Hvor")
+      .replace(/\.{2,}$/, '…').trim();
+    const raw = block.map(l => tidy(l.text)).filter(t => (t.match(/\p{Ll}/gu) || []).length >= 1 && (t.match(/\p{L}/gu) || []).length >= 2);   // real dialogue has lower-case letters (drops logos like "DR1")
     const parts = [];
     for (const t of raw) { if (/^[-–]/.test(t) || !parts.length) parts.push(t.replace(/^[-–]\s*/, '')); else parts[parts.length - 1] += ' ' + t; }
     const lines = [];
     for (const da of parts) {
-      if (/[\[\]{}<>@#=_]|subtit|original|undertekst/i.test(da)) continue;     // menus, titles, channel info
+      if (/[\[\]{}<>@#=_]|subtit|original|undertekst/i.test(da) || da.length < 2) continue;     // menus, titles, channel info
       const { en, src } = await googleTranslateAuto(da);
       if (!['da', 'no', 'nb', 'nn', 'sv'].includes(src)) continue;            // not Danish = not a subtitle
       if (norm(en) === norm(da)) continue;                                       // nothing to translate
@@ -1188,7 +1225,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     }
     const textiness = trans / Math.max(1, span);
     if (textiness < 0.06) n = 0;
-    return { w, h, n, y0: ty0, y1: ty1, bx0, bx1, tx: textiness, col: smooth(col), row: smooth(brow) };
+    return { c, w, h, n, y0: ty0, y1: ty1, bx0, bx1, tx: textiness, col: smooth(col), row: smooth(brow) };
   }
   function smooth(v) {
     const o = new Float32Array(v.length);
@@ -1217,7 +1254,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return Math.max(dh, moved, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
   }
   let prevM = null, sentM = null, lastSendTime = 0, changeSince = 0, lastDone = 0;
-  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0, missStreak = 0, blindUntil = 0;
+  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0, missStreak = 0, blindUntil = 0, lastBand = null;
   const cap = () => S.engine === 'free' ? 1 : 3;
   const dbg = { n: 0, stab: 0, chg: 0, why: '', ms: 0 };
   // Speed governor: never send more looks per minute than the AI account allows, so it never blocks us.
@@ -1253,6 +1290,10 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       if (!m) continue;
       const stab = prevM ? diffRatio(prevM, m) : 1, chg = sentM ? diffRatio(sentM, m) : 1;
       prevM = m; dbg.n = m.n; dbg.stab = stab; dbg.chg = chg;
+      if (m.n >= MIN_TEXT && m.y1 >= 0 && m.bx1 > m.bx0) {
+        const sx = m.c.sw / m.w, sy = m.c.sh / m.h;
+        lastBand = { x0: m.c.x0 + m.bx0 * sx, x1: m.c.x0 + (m.bx1 + 1) * sx, y0: m.c.y0 + m.y0 * sy, y1: m.c.y0 + (m.y1 + 1) * sy, t: now };
+      }
       if (S.diag) $('diag').textContent = (now < blindUntil ? 'TIMER MODE (watcher unsure)  ' : '') + `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)}, bright≥${dbg.brT})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
       const hasText = m.n >= MIN_TEXT, hadText = sentM && sentM.n >= MIN_TEXT;
       const gap = now - lastSendTime, base = Math.max(800, S.iv);
