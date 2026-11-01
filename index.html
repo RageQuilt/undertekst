@@ -273,6 +273,7 @@
     <option value="none">Off</option>
     <option value="samsung">Samsung TV</option>
     <option value="lg">LG TV</option>
+    <option value="ir">Infrared via Wi-Fi IR blaster (Strong box and other IR devices)</option>
     <option value="other">Something else (Google TV, Apple TV, Roku, Fire TV…)</option>
   </select>
   <div id="tvSetup">
@@ -296,6 +297,29 @@
     <div class="note" id="tvStatus"></div>
     <div class="note">Netflix on the TV skips 10 seconds per press, so "Back to this line" lands within 10 seconds of the line.</div>
     <div class="row" style="margin-top:8px"><button class="big" id="tvForget">Forget TV pairing</button></div>
+  </div>
+  <div id="tvIr">
+    <div class="note">
+      Phones can't send infrared from a web page, so a small Wi-Fi IR blaster next to the TV does it. It also listens, which is how the app scans your own remote.<br><br>
+      1. Get a Wi-Fi IR blaster that comes with Tasmota installed, for example the <b>Athom AR01 IR Controller</b> (about 100–200 kr).<br>
+      2. Plug it in near the box. On your phone, join its Wi-Fi hotspot "tasmota-…", and enter your home Wi-Fi name and password.<br>
+      3. Open the blaster's page (its IP address, shown in your router) → <b>Console</b>, paste this command and press Enter:
+    </div>
+    <div id="irCmd" style="font:12px ui-monospace,monospace;background:#000;border:1px solid #333;border-radius:8px;padding:8px;margin-top:8px;word-break:break-all;-webkit-user-select:all;user-select:all"></div>
+    <div class="row" style="margin-top:8px"><button class="big" id="irCopy">Copy command</button></div>
+    <div class="note">4. Tap Scan remote and press each button the app asks for, with your remote pointed at the blaster.<br>5. Place the blaster so it can "see" the box, then tap Test pause.</div>
+    <div class="row" style="margin-top:8px"><button class="big on" id="irScan">Scan remote</button><button class="big" id="irTest">Test pause</button></div>
+    <div id="irLearn" style="display:none;margin-top:10px;background:#1c1c1c;border:1px solid #ffd400;border-radius:12px;padding:12px">
+      <div id="irLearnStep" style="font-weight:600"></div>
+      <div id="irLearnMsg" class="note"></div>
+      <div class="row" style="margin-top:8px"><button class="big" id="irSkip">Skip</button><button class="big" id="irStop">Stop</button></div>
+    </div>
+    <div class="note" id="irCodesInfo"></div>
+    <div class="note" id="tvStatusIr"></div>
+    <label>Relay server (advanced)</label>
+    <input type="text" id="irBroker" style="width:100%" autocomplete="off">
+    <div class="row" style="margin-top:8px"><button class="big" id="irNewTopic">New private channel name</button></div>
+    <div class="note">The free relay is shared, but the channel name is random and private to you. Making a new one means pasting the new command into the blaster again.</div>
   </div>
   <div class="note" id="tvOther">These can't be controlled from a web page (they need a native app or a home hub). Samsung and LG TVs can.</div>
   <label class="row" style="color:#ccc"><input type="checkbox" id="showdiag"> Show diagnostics (for troubleshooting)</label>
@@ -1278,7 +1302,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   // (minus time paused from this app) and press left that many times.
   const TV = { ws: null, ptr: null, ok: false, playing: true, pauses: [], pauseStart: 0,
     type: store.get('tvType', 'none'), ip: store.get('tvIp', ''), token: store.get('tvToken', ''), lgKey: store.get('tvLgKey', '') };
-  function tvStatus(t, good) { $('tvStatus').textContent = t; $('tvStatus').style.color = good ? '#9be29b' : '#ffb36b'; }
+  function tvStatus(t, good) { for (const id of ['tvStatus', 'tvStatusIr']) { $(id).textContent = t; $(id).style.color = good ? '#9be29b' : '#ffb36b'; } }
   function tvUI() {
     $('tvType').value = TV.type; $('tvIp').value = TV.ip;
     $('tvSamsung').style.display = TV.type === 'samsung' ? 'block' : 'none';
@@ -1287,13 +1311,15 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     $('tvSetup').style.display = (TV.type === 'samsung' || TV.type === 'lg') ? 'block' : 'none';
     const port = TV.type === 'lg' ? 3001 : 8002;
     $('tvTrust').href = TV.ip ? `https://${TV.ip}:${port}/` : '#';
-    $('tvRemote').style.display = (TV.type === 'samsung' || TV.type === 'lg') && TV.ip ? 'flex' : 'none';
+    $('tvIr').style.display = TV.type === 'ir' ? 'block' : 'none';
+    $('tvRemote').style.display = tvControlled() ? 'flex' : 'none';
   }
   $('tvType').onchange = e => { TV.type = e.target.value; store.set('tvType', TV.type); tvDisconnect(); tvUI(); };
   $('tvIp').onchange = e => { TV.ip = e.target.value.trim(); store.set('tvIp', TV.ip); tvDisconnect(); tvUI(); };
   function tvDisconnect() { try { TV.ws && TV.ws.close(); } catch (e) {} try { TV.ptr && TV.ptr.close(); } catch (e) {} TV.ws = TV.ptr = null; TV.ok = false; }
 
   function tvConnect() {
+    if (TV.type === 'ir') return irConnect();
     return new Promise(resolve => {
       if (TV.ok) return resolve(true);
       if (!TV.ip) { tvStatus('Type the TV\'s IP address first.'); return resolve(false); }
@@ -1352,6 +1378,9 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     if (TV.type === 'samsung') {
       const map = { LEFT: 'KEY_LEFT', RIGHT: 'KEY_RIGHT', PLAY: 'KEY_PLAY', PAUSE: 'KEY_PAUSE', ENTER: 'KEY_ENTER' };
       TV.ws.send(JSON.stringify({ method: 'ms.remote.control', params: { Cmd: 'Click', DataOfCmd: map[name], Option: 'false', TypeOfRemote: 'SendRemoteKey' } }));
+    } else if (TV.type === 'ir') {
+      const k = (name === 'PLAY' || name === 'PAUSE') ? (IR.codes.PLAYPAUSE ? 'PLAYPAUSE' : 'OK') : name === 'ENTER' ? 'OK' : name;
+      if (!irSend(IR.codes[k])) throw new Error('no code');
     } else if (TV.type === 'lg') {
       if (name === 'PLAY' || name === 'PAUSE') TV.ws.send(JSON.stringify({ type: 'request', id: 'mc' + Date.now(), uri: 'ssap://media.controls/' + name.toLowerCase() }));
       else TV.ptr.send(`type:button\nname:${name}\n\n`);
@@ -1402,7 +1431,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   let jumpChip = null, jumpTimer = 0;
   function showJump(el) {
     if (jumpChip) jumpChip.remove();
-    if (!(TV.type === 'samsung' || TV.type === 'lg') || !TV.ip) return;
+    if (!tvControlled()) return;
     const line = conv.find(l => String(l.id) === el.dataset.lid); if (!line) return;
     const r = el.closest('.line').getBoundingClientRect();
     jumpChip = document.createElement('button'); jumpChip.className = 'jump'; jumpChip.textContent = '⏪ Back to this line';
@@ -1411,7 +1440,6 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     document.body.appendChild(jumpChip);
     clearTimeout(jumpTimer); jumpTimer = setTimeout(() => { if (jumpChip) { jumpChip.remove(); jumpChip = null; } }, 3500);
   }
-  tvUI();
 
   // ---------- quick buttons on the main screen ----------
   const SIZES = [['S', 20, 16], ['M', 26, 20], ['L', 32, 24], ['XL', 40, 30]];
@@ -1568,7 +1596,7 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     let paused = false;
     if (S.cult === 'pause' && Date.now() - lastCultPause > 60000) {
       lastCultPause = Date.now();
-      if ((TV.type === 'samsung' || TV.type === 'lg') && TV.ip && TV.playing) { if (await tvPress('PAUSE')) { setPlaying(false); paused = true; } }
+      if (tvControlled() && TV.playing) { if (await tvPress('PAUSE')) { setPlaying(false); paused = true; } }
       else { try { navigator.vibrate && navigator.vibrate([60, 80, 60]); } catch (e) {} }
     }
     let literal = res.literal || '';
@@ -1602,8 +1630,95 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   quickUI();
   if (S.hear) document.addEventListener('click', function once() { document.removeEventListener('click', once); startHearing(); });
 
+  // ---------- infrared remote via a Wi-Fi IR blaster (Tasmota) ----------
+  // Phone browsers can't send infrared, so a small Wi-Fi blaster next to the TV does it.
+  // The app and the blaster talk through a free relay server (MQTT). The blaster also RECEIVES infrared,
+  // which is how we "scan" the buttons of your own remote.
+  const IR = { client: null, online: false, codes: store.get('irCodes', {}), broker: store.get('irBroker', 'wss://broker.hivemq.com:8884/mqtt'),
+    topic: store.get('irTopic', ''), learning: null };
+  if (!IR.topic) { IR.topic = 'ut' + Math.random().toString(16).slice(2, 10); store.set('irTopic', IR.topic); }
+  const IR_KEYS = [['OK', 'the middle OK / select button (play-pause in Netflix)'], ['LEFT', 'LEFT arrow (back 10 s)'], ['RIGHT', 'RIGHT arrow (forward 10 s)'], ['PLAYPAUSE', 'the ▶❚❚ play/pause button, if your remote has one (otherwise tap Skip)']];
+  function irCmd() { return `Backlog MqttHost broker.hivemq.com; MqttPort 1883; MqttUser 0; MqttPassword 0; Topic ${IR.topic}; SetOption58 1`; }
+  function irUI() {
+    $('irCmd').textContent = irCmd();
+    $('irBroker').value = IR.broker;
+    $('irCodesInfo').textContent = IR_KEYS.map(([k]) => `${k}: ${IR.codes[k] ? '✓' : '–'}`).join('   ');
+  }
+  function loadMqtt() {
+    if (window.mqtt) return Promise.resolve();
+    return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://unpkg.com/mqtt@5/dist/mqtt.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('Could not load the relay library')); document.head.appendChild(sc); });
+  }
+  async function irConnect() {
+    if (IR.client && IR.client.connected) return true;
+    try { await loadMqtt(); } catch (e) { tvStatus(e.message); return false; }
+    return new Promise(resolve => {
+      try { IR.client && IR.client.end(true); } catch (e) {}
+      const c = mqtt.connect(IR.broker, { clientId: 'undertekst-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000, connectTimeout: 8000 });
+      IR.client = c;
+      let done = false;
+      const t = setTimeout(() => { if (!done) { done = true; tvStatus('Could not reach the relay server. Check your internet.'); resolve(false); } }, 10000);
+      c.on('connect', () => {
+        c.subscribe([`tele/${IR.topic}/#`, `stat/${IR.topic}/#`]);
+        c.publish(`cmnd/${IR.topic}/Status`, '0');                      // ask the blaster to say hello
+        if (!done) { done = true; clearTimeout(t); tvStatus('Connected to relay. Waiting for the blaster…', true); resolve(true); }
+      });
+      c.on('message', (topic, buf) => {
+        const msg = buf.toString();
+        if (topic.endsWith('/LWT')) { IR.online = msg === 'Online'; tvStatus(IR.online ? 'IR blaster online ✓' : 'IR blaster is offline (check its power and Wi-Fi)', IR.online); return; }
+        if (topic.startsWith('stat/') && !IR.online) { IR.online = true; tvStatus('IR blaster online ✓', true); }
+        let j; try { j = JSON.parse(msg); } catch (e) { return; }
+        if (j.IrReceived) irReceived(j.IrReceived);
+      });
+      c.on('error', () => {});
+    });
+  }
+  function irSend(code) {
+    if (!code || !IR.client) return false;
+    let payload;
+    if (code.Protocol && code.Protocol !== 'UNKNOWN' && code.Data) payload = JSON.stringify({ Protocol: code.Protocol, Bits: code.Bits, Data: code.Data, Repeat: 0 });
+    else if (code.RawData) payload = '0,' + code.RawData;
+    else return false;
+    IR.client.publish(`cmnd/${IR.topic}/IRsend`, payload);
+    return true;
+  }
+  // --- scan wizard: press each remote button at the blaster ---
+  let learnTimer = 0;
+  function irReceived(code) {
+    if (!IR.learning) return;
+    if (/^0x(F)+$/i.test(String(code.Data || '')) && code.Protocol === 'NEC') return;   // NEC "button held" repeat signal
+    const [key] = IR_KEYS[IR.learning.i];
+    IR.codes[key] = code; store.set('irCodes', IR.codes);
+    $('irLearnMsg').textContent = `✓ Got ${key} (${code.Protocol || 'raw'})`;
+    try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
+    clearTimeout(learnTimer); setTimeout(() => irNextKey(1), 900);
+  }
+  function irNextKey(step) {
+    IR.learning.i += step;
+    if (IR.learning.i >= IR_KEYS.length) { IR.learning = null; $('irLearn').style.display = 'none'; irUI(); tvUI(); tvStatus('Remote scanned ✓  Try "Test pause".', true); return; }
+    const [key, label] = IR_KEYS[IR.learning.i];
+    $('irLearnStep').textContent = `Step ${IR.learning.i + 1} of ${IR_KEYS.length}: point your remote at the blaster (10 cm away) and press ${label}.`;
+    $('irLearnMsg').textContent = 'Listening…';
+    clearTimeout(learnTimer);
+    learnTimer = setTimeout(() => {
+      if (IR.learning) $('irLearnMsg').textContent = 'Nothing received yet. Your remote may be using Bluetooth instead of infrared: on the box go to Settings → Remotes & Accessories, forget the remote, then press again. You can pair it again afterwards.';
+    }, 10000);
+  }
+  $('irScan').onclick = async () => {
+    if (!(await irConnect())) return;
+    IR.learning = { i: -1 }; $('irLearn').style.display = 'block'; irNextKey(1);
+  };
+  $('irSkip').onclick = () => { if (IR.learning) irNextKey(1); };
+  $('irStop').onclick = () => { IR.learning = null; clearTimeout(learnTimer); $('irLearn').style.display = 'none'; irUI(); tvUI(); };
+  $('irCopy').onclick = async () => { try { await navigator.clipboard.writeText(irCmd()); $('irCopy').textContent = 'Copied ✓'; } catch (e) { $('irCopy').textContent = 'Copy failed: select the text'; } setTimeout(() => $('irCopy').textContent = 'Copy command', 1500); };
+  $('irBroker').onchange = e => { IR.broker = e.target.value.trim(); store.set('irBroker', IR.broker); try { IR.client && IR.client.end(true); } catch (er) {} IR.client = null; };
+  $('irNewTopic').onclick = () => { IR.topic = 'ut' + Math.random().toString(16).slice(2, 10); store.set('irTopic', IR.topic); try { IR.client && IR.client.end(true); } catch (e) {} IR.client = null; irUI(); };
+  irUI();
+
+  $('irTest').onclick = async () => { if (await tvPress('PAUSE')) { setPlaying(false); tvStatus('Sent pause. Did the box pause? Press ⏯ in the Danish box to resume.', true); } };
+  tvUI();
+
   // ---------- 📖 study pause ----------
-  function tvControlled() { return (TV.type === 'samsung' || TV.type === 'lg') && !!TV.ip; }
+  function tvControlled() { return ((TV.type === 'samsung' || TV.type === 'lg') && !!TV.ip) || (TV.type === 'ir' && !!(IR.codes.OK || IR.codes.PLAYPAUSE)); }
   $('studyMode').value = S.study; $('studyResume').value = S.studyResume; $('studySpeed').value = S.studySpeed;
   $('studySpeedv').textContent = S.studySpeed.toFixed(1) + ' s';
   $('studyMode').onchange = e => { S.study = e.target.value; store.set('study', S.study); quickUI(); };
