@@ -1123,7 +1123,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   // 2. Focus on the lowest band of rows packed with such pixels: that is where subtitles sit.
   //    Moving things elsewhere in the picture are ignored.
   // 3. When that band's "shape" changes, look right away once it settles, or after 0.45 s if the picture is too busy to settle.
-  const DW = 360, MIN_TEXT = 30;
+  const DW = 400, MIN_TEXT = 15;
   const dc = document.createElement('canvas'), dx = dc.getContext('2d', { willReadFrequently: true });
   let bufW = 0, bufH = 0, lumB = null, briB = null;
   function detectMask() {
@@ -1132,44 +1132,63 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     dc.width = w; dc.height = h; dx.drawImage(video, c.x0, c.y0, c.sw, c.sh, 0, 0, w, h);
     const d = dx.getImageData(0, 0, w, h).data, N = w * h;
     if (w !== bufW || h !== bufH) { bufW = w; bufH = h; lumB = new Uint8Array(N); briB = new Uint8Array(N); }
+    // Brightness thresholds adapt to the picture: a phone camera sees a TV's white text as light grey, not pure white.
+    const hist = new Uint32Array(256);
     for (let i = 0, p = 0; p < N; i += 4, p++) {
-      const R = d[i], G = d[i + 1], B = d[i + 2], mx = R > G ? (R > B ? R : B) : (G > B ? G : B), mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
-      lumB[p] = (R * 77 + G * 150 + B * 29) >> 8;
-      briB[p] = ((mx > 165 && mx - mn < 70) || (R > 170 && G > 150 && B < 120)) ? 1 : 0;
+      const R = d[i], G = d[i + 1], B = d[i + 2];
+      const l = (R * 77 + G * 150 + B * 29) >> 8; lumB[p] = l; hist[l]++;
+      const mx = R > G ? (R > B ? R : B) : (G > B ? G : B), mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+      briB[p] = mx - mn < 80 ? 1 : (R > G * 0.9 && G > B * 1.4 ? 2 : 0);      // 1 = colourless, 2 = yellowish, 0 = coloured
     }
-    // text pixel = bright with a dark pixel 2 px left/right/up/down (the subtitle outline)
+    let acc = 0, p99 = 255; const lim = N * 0.985;
+    for (let l = 0; l < 256; l++) { acc += hist[l]; if (acc >= lim) { p99 = l; break; } }
+    const brT = Math.min(200, Math.max(110, p99 - 18)), dkT = Math.min(110, Math.max(45, brT - 75));
+    dbg.brT = brT;
+    for (let p = 0; p < N; p++) briB[p] = briB[p] && lumB[p] >= 115 ? 1 : 0;
+    // text pixel = bright with a dark pixel 2-3 px left/right/up/down (the subtitle outline or shadow)
     const row = new Float32Array(h);
+    // text pixel = light, colourless pixel with a clearly darker pixel 2-3 px away on both sides (left+right or above+below):
+    // the outline/shadow around subtitle letters. Measured relative to the pixel itself, so camera exposure doesn't matter.
     const isText = p => {
       if (!briB[p]) return 0;
-      const x = p % w;
-      return ((x > 1 && lumB[p - 2] < 100) || (x < w - 2 && lumB[p + 2] < 100) || (p >= 2 * w && lumB[p - 2 * w] < 100) || (p < N - 2 * w && lumB[p + 2 * w] < 100)) ? 1 : 0;
+      const x = p % w, L = lumB[p] - 55;
+      const lft = x > 2 && (lumB[p - 2] < L || lumB[p - 3] < L), rgt = x < w - 3 && (lumB[p + 2] < L || lumB[p + 3] < L);
+      const up = p >= 3 * w && (lumB[p - 2 * w] < L || lumB[p - 3 * w] < L), dn = p < N - 3 * w && (lumB[p + 2 * w] < L || lumB[p + 3 * w] < L);
+      return (lft && rgt) || (up && dn) ? 1 : 0;
     };
     const mask = new Uint8Array(N);
-    for (let p = 0; p < N; p++) if (isText(p)) { mask[p] = 1; row[(p / w) | 0]++; }
-    // lowest band of text rows (subtitles); text rows have many text pixels spread across the row
-    const thr = Math.max(4, w * 0.02);
+    // Per row: how many separate strokes, and how wide they spread. A row through letters has many short strokes
+    // close together; a row through an object has one or two long edges.
+    const seg = new Uint16Array(h), spanR = new Uint16Array(h), textRow = new Uint8Array(h);
+    for (let y = 0; y < h; y++) {
+      let prev = 0, xmin = -1, xmax = -1, sg = 0, cnt = 0;
+      for (let x = 0, p = y * w; x < w; x++, p++) {
+        const v = isText(p); mask[p] = v;
+        if (v) { cnt++; if (!prev) sg++; if (xmin < 0) xmin = x; xmax = x; }
+        prev = v;
+      }
+      seg[y] = sg; spanR[y] = xmin < 0 ? 0 : xmax - xmin + 1; row[y] = cnt;
+      textRow[y] = sg >= 4 && sg / Math.max(1, spanR[y]) >= 0.06 && cnt / sg < 6 ? 1 : 0;   // strokes are short
+    }
+    // lowest band of text rows = the subtitle (at most ~20% of the window tall)
+    const gapMax = Math.max(3, Math.round(h * 0.02)), bandMax = Math.round(h * 0.2);
     let y1 = -1, y0 = -1;
     for (let y = h - 1; y >= 0; y--) {
-      if (row[y] >= thr) { if (y1 < 0) y1 = y; y0 = y; }
-      else if (y1 >= 0 && y0 - y > Math.max(4, h * 0.05)) break;     // gap ends the band (allows the space between two subtitle lines)
+      if (textRow[y]) { if (y1 < 0) y1 = y; y0 = y; if (y1 - y0 > bandMax) break; }
+      else if (y1 >= 0 && y0 - y > gapMax) break;
     }
     let n = 0; const col = new Float32Array(w), brow = new Float32Array(Math.max(1, y1 - y0 + 1));
-    let trans = 0, span = 0;
-    if (y1 >= 0 && y1 - y0 >= 2) {
+    let trans = 0, span = 0, bx0 = w, bx1 = -1, ty0 = -1, ty1 = -1;
+    if (y1 >= 0 && y1 - y0 >= 1) {
       for (let y = y0; y <= y1; y++) {
-        let xmin = -1, xmax = -1, prev = 0;
-        for (let x = 0; x < w; x++) {
-          const v = mask[y * w + x];
-          if (v) { col[x]++; brow[y - y0]++; n++; if (xmin < 0) xmin = x; xmax = x; if (!prev) trans++; }
-          prev = v;
-        }
-        if (xmin >= 0) span += xmax - xmin + 1;
+        if (!textRow[y]) continue;
+        trans += seg[y]; span += spanR[y]; if (ty0 < 0) ty0 = y; ty1 = y;
+        for (let x = 0; x < w; x++) if (mask[y * w + x]) { col[x]++; brow[y - y0]++; n++; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; }
       }
     }
-    // Letters = many short strokes packed close together. Objects in the picture = a few long edges.
     const textiness = trans / Math.max(1, span);
-    if (textiness < 0.09) n = 0;
-    return { w, h, n, y0, y1, tx: textiness, col: smooth(col), row: smooth(brow) };
+    if (textiness < 0.06) n = 0;
+    return { w, h, n, y0: ty0, y1: ty1, bx0, bx1, tx: textiness, col: smooth(col), row: smooth(brow) };
   }
   function smooth(v) {
     const o = new Float32Array(v.length);
@@ -1191,11 +1210,14 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     if (!a || !b || a.w !== b.w) return 1;
     if (a.n < MIN_TEXT && b.n < MIN_TEXT) return 0;
     if ((a.n < MIN_TEXT) !== (b.n < MIN_TEXT)) return 1;
-    const lines = Math.abs((a.y1 - a.y0) - (b.y1 - b.y0)) > Math.max(6, a.h * 0.04) ? 0.5 : 0;   // one line vs two lines
-    return Math.max(lines, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
+    // Robust features for small, shaky text: width, height (1 vs 2 lines) and position of the subtitle block.
+    const ha = a.y1 - a.y0 + 1, hb = b.y1 - b.y0 + 1;
+    const dh = Math.abs(ha - hb) / Math.max(ha, hb, 4) > 0.45 ? 1 : 0;                       // one line vs two lines
+    const moved = Math.abs((a.y0 + a.y1) - (b.y0 + b.y1)) / 2 > Math.max(5, Math.max(ha, hb)) ? 1 : 0;
+    return Math.max(dh, moved, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
   }
   let prevM = null, sentM = null, lastSendTime = 0, changeSince = 0, lastDone = 0;
-  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0;
+  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0, missStreak = 0, blindUntil = 0;
   const cap = () => S.engine === 'free' ? 1 : 3;
   const dbg = { n: 0, stab: 0, chg: 0, why: '', ms: 0 };
   // Speed governor: never send more looks per minute than the AI account allows, so it never blocks us.
@@ -1207,10 +1229,10 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     bucket.tokens = Math.min(5, bucket.tokens + (now - bucket.last) / 60000 * rpm()); bucket.last = now;
     const priority = why === 'new subtitle';
     if (inFlight >= cap() || now < pauseUntil || now - lastSendTime < 350) return false;
-    if (now < quietUntil && (!priority || emptyStreak >= 3)) return false;
-    if (bucket.tokens < (priority ? 1 : 2.5)) return false;
+    if (now < quietUntil && !priority && now - lastSendTime < 2500) return false;   // after empty answers, space out the steady looks a little
+    if (bucket.tokens < (priority ? 1 : 1.5)) return false;
     bucket.tokens -= 1;
-    sentM = m; lastSendTime = now; changeSince = 0; dbg.why = why; tick();
+    sentM = m; lastSendTime = now; changeSince = 0; dbg.why = why; tick(why);
     if (priority || why.startsWith('new')) onNewSubtitle();
     return true;
   }
@@ -1224,32 +1246,34 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
         let m0; try { m0 = detectMask(); } catch (e) {}
         if (m0) { prevM = m0; sentM = m0; } changeSince = 0; continue;
       }
-      if (!S.smartSkip) { if (now - lastSendTime >= S.iv * backoff) fire(null, 'timer'); continue; }
+      if (!S.smartSkip || now < blindUntil) { if (now - lastSendTime >= Math.max(S.iv, 1000)) fire(null, now < blindUntil ? 'timer (watcher unsure)' : 'timer'); continue; }
       const tm = performance.now();
       let m; try { m = detectMask(); } catch (e) { m = null; }
       dbg.ms = dbg.ms ? dbg.ms * 0.9 + (performance.now() - tm) * 0.1 : performance.now() - tm;
       if (!m) continue;
       const stab = prevM ? diffRatio(prevM, m) : 1, chg = sentM ? diffRatio(sentM, m) : 1;
       prevM = m; dbg.n = m.n; dbg.stab = stab; dbg.chg = chg;
-      if (S.diag) $('diag').textContent = `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
-      const hasText = m.n >= MIN_TEXT;
-      if (!hasText) {
-        changeSince = 0;
-        if (stab < 0.2 && sentM && sentM.n >= MIN_TEXT) sentM = m;      // subtitle gone: the next one counts as new even if it repeats
-      } else if (chg > 0.3) {
-        if (!changeSince) changeSince = now;
-        if (stab < 0.22) { if (fire(m, 'new subtitle')) continue; }                 // settled: look now
-        else if (now - changeSince > 450) { if (fire(m, 'new subtitle (busy picture)')) continue; }
-      } else changeSince = 0;
-      // safety look: never go more than 3 s (with text) or 6 s (without) between looks
-      const gap = now - lastSendTime;
-      if (gap > (hasText ? 3000 : 6000) * (pauseUntil > now ? 2 : 1)) fire(m, 'safety');
+      if (S.diag) $('diag').textContent = (now < blindUntil ? 'TIMER MODE (watcher unsure)  ' : '') + `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)}, bright≥${dbg.brT})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
+      const hasText = m.n >= MIN_TEXT, hadText = sentM && sentM.n >= MIN_TEXT;
+      const gap = now - lastSendTime, base = Math.max(800, S.iv);
+      // 1. Confident new subtitle: look right now.
+      const changedNow = hasText && chg > 0.4 && stab < 0.25;
+      if (changedNow && changeSince) { if (fire(m, 'new subtitle')) continue; }   // seen on two frames in a row = real, not grain
+      changeSince = changedNow ? (changeSince || now) : 0;
+      // 2. Otherwise look on a steady beat, unless the watcher is confident nothing changed.
+      if (gap >= base) {
+        const sameText = hasText && hadText && chg < 0.3;                   // clearly the same subtitle as last look
+        const nothing = !hasText && !hadText;                                // clearly no subtitle, before and now
+        const maxSkip = 3000;                                                // never trust a skip for too long
+        if ((sameText || nothing) && gap < maxSkip) continue;
+        fire(m, 'timer');
+      }
     }
   }
   // Answers with no new subtitle: the watcher was fooled by the picture. Be more careful for a while.
-  function quietDown() { emptyStreak++; quietUntil = Date.now() + Math.min(emptyStreak >= 3 ? 2500 : 8000, 1500 * emptyStreak); }
+  function quietDown() { emptyStreak++; quietUntil = Date.now() + Math.min(2500, 800 * emptyStreak); }
   const setStatus = t => { $('status').textContent = t; };
-  async function tick() {
+  async function tick(why) {
     if (!live || document.hidden || inFlight >= cap() || Date.now() < pauseUntil) return;
     inFlight++; $('dot').classList.add('busy');
     const t0 = Date.now();
@@ -1272,9 +1296,11 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
           if (my > shownSeq) { shownSeq = my; lastDaText = daText; }
           addLines(res.lines, my, t0);
           emptyStreak = 0; quietUntil = 0;
-        } else quietDown();
+          // A safety/timer look found a subtitle the watcher didn't flag: the watcher can't see this TV well.
+
+        } else if (why !== 'new subtitle') quietDown();          // only "maybe" looks that found nothing new make us careful
       } else {
-        quietDown();
+        if (why !== 'new subtitle') quietDown();
         if (Date.now() - lastHit > 4000) setStatus('Looking… keep the TV inside the camera window');
       }
     } catch (e) {
@@ -1295,7 +1321,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
 
   // test hook: lets a page preview run without a camera or API key
-  window.__ut = { addLines, bank: () => bank, dbg };
+  window.__ut = { snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
 
   // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
   // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
