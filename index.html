@@ -65,6 +65,7 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,212,0,.75); } 100% { box-shadow: 0 0 0 9px rgba(255,212,0,0); } }
   .bubble { position: fixed; z-index: 55; transform: translate(-50%, 0); background: #ffd400; color: #000; font-weight: 600;
     font-size: 15px; padding: 5px 10px; border-radius: 10px; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); max-width: 80vw; }
+  .jump { position: fixed; z-index: 56; left: 50%; transform: translateX(-50%); background: #ffd400; color: #000; border: 0; border-radius: 16px; padding: 7px 14px; font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
   .empty { color: #777; font-size: 15px; font-weight: 400; padding-top: 4px; }
 
   .toast { position: fixed; z-index: 60; font-size: 12px; font-weight: 600; background: rgba(255,212,0,0.95); color: #000;
@@ -140,7 +141,10 @@
 <!-- Danish: bottom -->
 <div class="panel" id="pDa">
   <div class="grip" id="gDa"></div>
-  <div class="head" style="padding-top:0"><span class="tag">DA</span></div>
+  <div class="head" style="padding-top:0"><span class="tag" style="flex:1">DA</span>
+    <span id="tvRemote" style="display:none;gap:6px">
+      <button class="ib" id="tvRew">⏪10</button><button class="ib" id="tvPP">⏸</button><button class="ib" id="tvFf">10⏩</button>
+    </span></div>
   <div class="scroll" id="sDa"><div class="empty">Tap a word to see its match. Double-tap to save it.</div></div>
   <div class="grip" id="gDaB"></div>
 </div>
@@ -226,6 +230,36 @@
     <label>Camera zoom: <span id="zoomv"></span></label>
     <input type="range" id="zoom" step="0.1">
   </div>
+  <label>TV remote</label>
+  <select id="tvType" style="width:100%">
+    <option value="none">Off</option>
+    <option value="samsung">Samsung TV</option>
+    <option value="lg">LG TV</option>
+    <option value="other">Something else (Google TV, Apple TV, Roku, Fire TV…)</option>
+  </select>
+  <div id="tvSetup">
+    <div class="note" id="tvSamsung">
+      1. Phone and TV on the same Wi-Fi.<br>
+      2. On the TV: Settings → General (or Connection) → Network → Network Status → IP Settings. Type the IP address below.<br>
+      3. Tap "Open TV security page", then Advanced → Proceed. It's a one-time step that lets this app talk to the TV. A blank page or error text after that is fine; come back here.<br>
+      4. Tap Connect and choose Allow on the TV.
+    </div>
+    <div class="note" id="tvLg">
+      1. Phone and TV on the same Wi-Fi. On the TV turn on: Settings → General → Devices → External devices → "TV On With Mobile" / "LG Connect Apps".<br>
+      2. Find the IP: Settings → Network → Wi-Fi (or Wired) → Advanced settings. Type it below.<br>
+      3. Tap "Open TV security page", then Advanced → Proceed (one time). Come back here.<br>
+      4. Tap Connect and press Accept on the TV.
+    </div>
+    <input type="text" id="tvIp" placeholder="TV IP address, e.g. 192.168.1.23" style="width:100%;margin-top:10px" inputmode="decimal" autocomplete="off">
+    <div class="row" style="margin-top:10px">
+      <a id="tvTrust" target="_blank" rel="noopener" class="big" style="flex:1;text-align:center;text-decoration:none;color:#fff;background:#222;border:1px solid #444;border-radius:12px;padding:12px">Open TV security page</a>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="big on" id="tvConnect">Connect</button><button class="big" id="tvTest">Test pause</button></div>
+    <div class="note" id="tvStatus"></div>
+    <div class="note">Netflix on the TV skips 10 seconds per press, so "Back to this line" lands within 10 seconds of the line.</div>
+    <div class="row" style="margin-top:8px"><button class="big" id="tvForget">Forget TV pairing</button></div>
+  </div>
+  <div class="note" id="tvOther">These can't be controlled from a web page (they need a native app or a home hub). Samsung and LG TVs can.</div>
   <label>Conversation</label>
   <div class="row"><button class="big" id="clearconv">Clear conversation</button></div>
   <label>Word bank backup</label>
@@ -489,6 +523,7 @@
     const other = ps.find(x => x.dataset.lang !== el.dataset.lang);
     if (other) other.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     else if (el.dataset.lang === 'da') wordBubble(el);   // no match from the AI: look the word up
+    showJump(el);
   }
   const wordCache = new Map();
   async function lookupWord(w) {
@@ -1099,6 +1134,143 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
   // test hook: lets a page preview run without a camera or API key
   window.__ut = { addLines, bank: () => bank };
+
+  // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
+  // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
+  // (minus time paused from this app) and press left that many times.
+  const TV = { ws: null, ptr: null, ok: false, playing: true, pauses: [], pauseStart: 0,
+    type: store.get('tvType', 'none'), ip: store.get('tvIp', ''), token: store.get('tvToken', ''), lgKey: store.get('tvLgKey', '') };
+  function tvStatus(t, good) { $('tvStatus').textContent = t; $('tvStatus').style.color = good ? '#9be29b' : '#ffb36b'; }
+  function tvUI() {
+    $('tvType').value = TV.type; $('tvIp').value = TV.ip;
+    $('tvSamsung').style.display = TV.type === 'samsung' ? 'block' : 'none';
+    $('tvLg').style.display = TV.type === 'lg' ? 'block' : 'none';
+    $('tvOther').style.display = TV.type === 'other' ? 'block' : 'none';
+    $('tvSetup').style.display = (TV.type === 'samsung' || TV.type === 'lg') ? 'block' : 'none';
+    const port = TV.type === 'lg' ? 3001 : 8002;
+    $('tvTrust').href = TV.ip ? `https://${TV.ip}:${port}/` : '#';
+    $('tvRemote').style.display = (TV.type === 'samsung' || TV.type === 'lg') && TV.ip ? 'flex' : 'none';
+  }
+  $('tvType').onchange = e => { TV.type = e.target.value; store.set('tvType', TV.type); tvDisconnect(); tvUI(); };
+  $('tvIp').onchange = e => { TV.ip = e.target.value.trim(); store.set('tvIp', TV.ip); tvDisconnect(); tvUI(); };
+  function tvDisconnect() { try { TV.ws && TV.ws.close(); } catch (e) {} try { TV.ptr && TV.ptr.close(); } catch (e) {} TV.ws = TV.ptr = null; TV.ok = false; }
+
+  function tvConnect() {
+    return new Promise(resolve => {
+      if (TV.ok) return resolve(true);
+      if (!TV.ip) { tvStatus('Type the TV\'s IP address first.'); return resolve(false); }
+      tvDisconnect();
+      const fail = msg => { tvStatus(msg); TV.ok = false; resolve(false); };
+      let ws;
+      try {
+        if (TV.type === 'samsung') {
+          ws = new WebSocket(`wss://${TV.ip}:8002/api/v2/channels/samsung.remote.control?name=${btoa('Undertekst')}` + (TV.token ? `&token=${TV.token}` : ''));
+        } else if (TV.type === 'lg') {
+          ws = new WebSocket(`wss://${TV.ip}:3001/`);
+        } else return fail('Pick Samsung or LG first.');
+      } catch (e) { return fail('Could not start the connection: ' + e.message); }
+      TV.ws = ws;
+      tvStatus(TV.type === 'samsung' && !TV.token ? 'Connecting… press Allow on the TV' : 'Connecting…', true);
+      const timer = setTimeout(() => { if (!TV.ok) { try { ws.close(); } catch (e) {} fail('No answer from the TV. Check step 3 and that both are on the same Wi-Fi.'); } }, 30000);
+      ws.onerror = () => { clearTimeout(timer); fail('Could not reach the TV. Do step 3 again, check the IP, and that the phone is on the same Wi-Fi.'); };
+      ws.onclose = () => { if (TV.ok) { TV.ok = false; tvStatus('Disconnected. It reconnects on the next button press.'); } };
+      if (TV.type === 'samsung') {
+        ws.onmessage = ev => {
+          let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+          if (m.event === 'ms.channel.connect') {
+            if (m.data && m.data.token) { TV.token = m.data.token; store.set('tvToken', TV.token); }
+            clearTimeout(timer); TV.ok = true; tvStatus('Connected to the TV ✓', true); resolve(true);
+          } else if (m.event === 'ms.channel.unauthorized') { clearTimeout(timer); fail('The TV refused. Press Connect again and choose Allow on the TV.'); }
+        };
+      } else {
+        const perms = ['CONTROL_INPUT_MEDIA_PLAYBACK', 'CONTROL_INPUT_JOYSTICK', 'CONTROL_MOUSE_AND_KEYBOARD', 'CONTROL_INPUT_TEXT', 'READ_INSTALLED_APPS'];
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'register', id: 'reg0', payload: {
+          forcePairing: false, pairingType: 'PROMPT', 'client-key': TV.lgKey || undefined,
+          manifest: { manifestVersion: 1, appVersion: '1.0', permissions: perms,
+            signed: { appId: 'com.undertekst.remote', created: '20261101', serial: '1', permissions: perms,
+              localizedAppNames: { '': 'Undertekst' }, localizedVendorNames: { '': 'Undertekst' }, vendorId: 'com.undertekst' },
+            signatures: [{ signatureVersion: 1, signature: '' }] } } }));
+        ws.onmessage = ev => {
+          let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+          if (m.type === 'response' && m.id === 'reg0' && m.payload && m.payload.pairingType) tvStatus('Press Accept on the TV…', true);
+          if (m.type === 'registered') {
+            if (m.payload && m.payload['client-key']) { TV.lgKey = m.payload['client-key']; store.set('tvLgKey', TV.lgKey); }
+            ws.send(JSON.stringify({ type: 'request', id: 'ptr', uri: 'ssap://com.webos.service.networkinput/getPointerInputSocket' }));
+          }
+          if (m.id === 'ptr' && m.payload && m.payload.socketPath) {
+            const p = new WebSocket(m.payload.socketPath.replace(/^ws:\/\/([^:/]+):3000/, 'wss://$1:3001'));
+            TV.ptr = p;
+            p.onopen = () => { clearTimeout(timer); TV.ok = true; tvStatus('Connected to the TV ✓', true); resolve(true); };
+            p.onerror = () => { clearTimeout(timer); fail('Paired, but the TV\'s button channel was blocked.'); };
+          }
+          if (m.type === 'error') { clearTimeout(timer); fail('The TV said: ' + (m.error || 'error')); }
+        };
+      }
+    });
+  }
+
+  // one button press on the TV
+  function tvKey(name) {
+    if (TV.type === 'samsung') {
+      const map = { LEFT: 'KEY_LEFT', RIGHT: 'KEY_RIGHT', PLAY: 'KEY_PLAY', PAUSE: 'KEY_PAUSE', ENTER: 'KEY_ENTER' };
+      TV.ws.send(JSON.stringify({ method: 'ms.remote.control', params: { Cmd: 'Click', DataOfCmd: map[name], Option: 'false', TypeOfRemote: 'SendRemoteKey' } }));
+    } else if (TV.type === 'lg') {
+      if (name === 'PLAY' || name === 'PAUSE') TV.ws.send(JSON.stringify({ type: 'request', id: 'mc' + Date.now(), uri: 'ssap://media.controls/' + name.toLowerCase() }));
+      else TV.ptr.send(`type:button\nname:${name}\n\n`);
+    }
+  }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function tvToast(text) {
+    const t = document.createElement('div'); t.className = 'toast'; t.textContent = text;
+    const r = $('tvRemote').getBoundingClientRect();
+    t.style.left = (r.left + r.width / 2) + 'px'; t.style.top = (r.top - 4) + 'px';
+    document.body.appendChild(t); setTimeout(() => t.remove(), 1300);
+  }
+  async function tvPress(name, times = 1) {
+    if (!(await tvConnect())) { tvToast('TV not connected, see ⚙'); return false; }
+    try { for (let i = 0; i < times; i++) { tvKey(name); if (times > 1) await sleep(280); } return true; }
+    catch (e) { TV.ok = false; tvToast('TV connection lost, try again'); return false; }
+  }
+  function setPlaying(p) {
+    if (TV.playing === p) return;
+    TV.playing = p;
+    if (!p) TV.pauseStart = Date.now(); else { TV.pauses.push([TV.pauseStart, Date.now()]); if (TV.pauses.length > 200) TV.pauses.shift(); }
+    $('tvPP').textContent = p ? '⏸' : '▶';
+  }
+  function pausedSince(t0) {
+    let ms = 0;
+    for (const [a, b] of TV.pauses) ms += Math.max(0, b - Math.max(a, t0));
+    if (!TV.playing) ms += Date.now() - Math.max(TV.pauseStart, t0);
+    return ms;
+  }
+  $('tvPP').onclick = async () => { const goPause = TV.playing; if (await tvPress(goPause ? 'PAUSE' : 'PLAY')) setPlaying(!goPause); };
+  $('tvRew').onclick = async () => { if (await tvPress('LEFT')) tvToast('⏪ 10 s'); };
+  $('tvFf').onclick = async () => { if (await tvPress('RIGHT')) tvToast('10 s ⏩'); };
+  $('tvConnect').onclick = () => { TV.ok = false; tvConnect(); };
+  $('tvTest').onclick = async () => { if (await tvPress('PAUSE')) { setPlaying(false); tvStatus('Sent pause. Did the TV pause? Press ⏯ in the Danish box to resume.', true); } };
+  $('tvForget').onclick = () => { TV.token = ''; TV.lgKey = ''; store.del('tvToken'); store.del('tvLgKey'); tvDisconnect(); tvStatus('Pairing forgotten.'); };
+
+  // "Back to this line": rewind by the time since the line appeared, in 10 s steps
+  async function jumpTo(line) {
+    const back = Date.now() - line.t - pausedSince(line.t) + 2500;   // +2.5 s: the subtitle was already showing before we read it
+    const steps = Math.max(1, Math.min(60, Math.ceil(back / 10000)));
+    if (!TV.playing) { if (!(await tvPress('PLAY'))) return; setPlaying(true); await sleep(600); }
+    tvToast(`⏪ ${steps * 10} s`);
+    await tvPress('LEFT', steps);
+  }
+  let jumpChip = null, jumpTimer = 0;
+  function showJump(el) {
+    if (jumpChip) jumpChip.remove();
+    if (!(TV.type === 'samsung' || TV.type === 'lg') || !TV.ip) return;
+    const line = conv.find(l => String(l.id) === el.dataset.lid); if (!line) return;
+    const r = el.closest('.line').getBoundingClientRect();
+    jumpChip = document.createElement('button'); jumpChip.className = 'jump'; jumpChip.textContent = '⏪ Back to this line';
+    jumpChip.style.top = (r.bottom + 44 < window.innerHeight ? r.bottom + 6 : Math.max(4, r.top - 34)) + 'px';
+    jumpChip.onclick = ev => { ev.stopPropagation(); jumpChip.remove(); jumpChip = null; jumpTo(line); };
+    document.body.appendChild(jumpChip);
+    clearTimeout(jumpTimer); jumpTimer = setTimeout(() => { if (jumpChip) { jumpChip.remove(); jumpChip = null; } }, 3500);
+  }
+  tvUI();
 
   // ---------- start ----------
   const KEYHELP = {
