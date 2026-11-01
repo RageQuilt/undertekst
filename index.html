@@ -208,6 +208,8 @@
   <label>How often to look: <span id="ivv"></span></label>
   <input type="range" id="iv" min="800" max="3000" step="100">
   <div class="note" id="estnote"></div>
+  <label class="row" style="color:#ccc"><input type="checkbox" id="smartskip"> Smart skip: don't pay for a look when the subtitle hasn't changed</label>
+  <div class="note">Works best with the phone held still or resting on something.</div>
   <label>Spending limit per session</label>
   <select id="budget">
     <option value="0.25">$0.25</option>
@@ -267,9 +269,9 @@
   let oldKey = ''; try { oldKey = JSON.parse(localStorage.getItem('ut2_key') || '""'); } catch (e) {}
   const S = {
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
-    gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 1200)),
+    gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   const saveBank = () => store.set('bank', bank);
@@ -366,6 +368,8 @@
   const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free'); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
+  $('smartskip').checked = S.smartSkip;
+  $('smartskip').onchange = e => { S.smartSkip = e.target.checked; store.set('smartSkip', S.smartSkip); };
   $('model').value = S.model;
   $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
   // engine choice
@@ -722,12 +726,21 @@
   const cv = document.createElement('canvas'), cx = cv.getContext('2d');
   function grab() {
     const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
-    // with digital zoom, send only the zoomed-in middle of the frame
-    const dz = hwZoom ? 1 : Z.cur;
-    const sw = vw / dz, sh = vh / dz, sx = (vw - sw) / 2, sy = (vh - sh) / 2;
-    const W = Math.min(1280, Math.round(sw)), H = Math.round(sh * W / sw);
-    cv.width = W; cv.height = H; cx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
-    return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
+    // Send only what you can see in the camera window between the text boxes (plus a small margin).
+    // Smaller picture = fewer tokens = faster and cheaper, with the TV at full sharpness.
+    const SW = window.innerWidth, SH = window.innerHeight;
+    const dz = hwZoom ? 1 : Z.cur;                                  // digital zoom (CSS scale around screen centre)
+    const s = Math.max(SW / vw, SH / vh), ox = (SW - vw * s) / 2, oy = (SH - vh * s) / 2;   // object-fit: cover
+    const toVid = (x, y) => [((SW / 2 + (x - SW / 2) / dz) - ox) / s, ((SH / 2 + (y - SH / 2) / dz) - oy) / s];
+    const m = 0.04 * SH;
+    let [x0, y0] = toVid(0, Math.max(0, gapTop - m)), [x1, y1] = toVid(SW, Math.min(SH, gapBottom + m));
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(vw, x1); y1 = Math.min(vh, y1);
+    let sw = x1 - x0, sh = y1 - y0;
+    if (sw < 40 || sh < 40) { x0 = 0; y0 = 0; sw = vw; sh = vh; }
+    const k = Math.min(1, 1100 / Math.max(sw, sh));
+    const W = Math.round(sw * k), H = Math.round(sh * k);
+    cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H);
+    return cv.toDataURL('image/jpeg', 0.8).split(',')[1];
   }
 
   // ---------- AI ----------
@@ -737,22 +750,21 @@
 2. Split the subtitle into speaker lines. A leading dash usually marks a new speaker. A sentence wrapped over two lines by one speaker is ONE line.
 3. Decide who says each line, as best you can, from who is on screen, who appears to be talking, the dashes and the conversation so far. Tag speakers M (man) or W (woman) plus a number in order of first appearance: M1, M2, W1, W2. Reuse the roster tags for people you have seen before. If you cannot tell at all, use "?".
 4. Translate each line into natural, idiomatic English.
-5. Word alignment: give Danish and English as arrays of [word, group] pairs in reading order. Attach punctuation to the neighbouring word (no separate punctuation tokens) and drop leading dialogue dashes. Words that translate each other share the same group number (1, 2, 3...). A group may cover several words on either side (e.g. "har lyst til" = "want to"). Use group 0 for words with no counterpart.
+5. Word links in "g": one group number per space-separated word of "da", then "|", then one per space-separated word of "en". Words that translate each other share a number (1, 2, 3...); a group can span several words (e.g. "har lyst til" = "want to"). Use 0 for words with no counterpart. Drop leading dialogue dashes.
 
-Reply with JSON only, no other text:
-{"lines":[{"spk":"W1","da":[["Hvor",1],["er",2],["du?",3]],"en":[["Where",1],["are",2],["you?",3]]}],"roster":{"W1":"blonde woman, green jacket"}}
-"roster" lists every speaker tag used so far with a short visual description (3-6 words) so you can recognise them in later frames.
+Reply with compact JSON only, no other text:
+{"lines":[{"spk":"W1","da":"Hvor har du været?","en":"Where have you been?","g":"1 2 3 2|1 2 3 2"}],"roster":{"M2":"bald man, grey suit"}}
+"roster": ONLY speakers that are new in this frame, with a 3-6 word visual description; omit it otherwise.
 If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
   async function askClaude(b64) {
-    const recent = conv.slice(-4).map(l => `${l.spk}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
-    const ctx = `Speaker roster so far: ${JSON.stringify(roster)}\nRecent dialogue, for context only (report what is on screen NOW, even if it repeats):\n${recent || '(none yet)'}`;
+    const ctx = contextText();
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: S.model, max_tokens: 900, system: SYSTEM,
+        model: S.model, max_tokens: 450, system: SYSTEM,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
           { type: 'text', text: ctx } ] }]
@@ -764,13 +776,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     }
     const j = await r.json();
     const cost = costOf(j.usage, 'claude');
-    const t = (j.content || []).map(c => c.text || '').join('');
-    const m = t.match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
-    let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
-    const ok = a => Array.isArray(a) && a.length && a.every(x => Array.isArray(x) && x.length >= 1);
-    const lines = (Array.isArray(o.lines) ? o.lines : []).filter(l => ok(l.da) && ok(l.en))
-      .map(l => ({ spk: String(l.spk || '?').slice(0, 4), da: l.da.map(x => [String(x[0]), +x[1] || 0]), en: l.en.map(x => [String(x[0]), +x[1] || 0]) }));
-    return { lines, cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+    return parseAI((j.content || []).map(c => c.text || '').join(''), cost);
   }
 
   function similar(a, b) {
@@ -784,13 +790,28 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function parseAI(t, cost) {
     const m = (t || '').match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
     let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
-    const ok = a => Array.isArray(a) && a.length && a.every(x => Array.isArray(x) && x.length >= 1);
-    const lines = (Array.isArray(o.lines) ? o.lines : []).filter(l => ok(l.da) && ok(l.en))
-      .map(l => ({ spk: String(l.spk || '?').slice(0, 4), da: l.da.map(x => [String(x[0]), +x[1] || 0]), en: l.en.map(x => [String(x[0]), +x[1] || 0]) }));
-    return { lines, cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+    return { lines: toLines(o), cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+  }
+  function toLines(o) {
+    const out = [];
+    for (const l of (Array.isArray(o.lines) ? o.lines : [])) {
+      let da, en;
+      if (typeof l.da === 'string' && typeof l.en === 'string') {
+        const dw = l.da.replace(/^\s*[-–]\s*/, '').trim().split(/\s+/).filter(Boolean);
+        const ew = l.en.replace(/^\s*[-–]\s*/, '').trim().split(/\s+/).filter(Boolean);
+        if (!dw.length || !ew.length) continue;
+        const [gd, ge] = String(l.g || '').split('|').map(x => x.trim().split(/\s+/).map(n => parseInt(n, 10) || 0));
+        const okG = gd && ge && gd.length === dw.length && ge.length === ew.length;
+        da = dw.map((w, i) => [w, okG ? gd[i] : 0]); en = ew.map((w, i) => [w, okG ? ge[i] : 0]);
+      } else if (Array.isArray(l.da) && Array.isArray(l.en) && l.da.length && l.en.length) {
+        da = l.da.map(x => [String(x[0]), +x[1] || 0]); en = l.en.map(x => [String(x[0]), +x[1] || 0]);
+      } else continue;
+      out.push({ spk: String(l.spk || '?').slice(0, 4), da, en });
+    }
+    return out;
   }
   function contextText() {
-    const recent = conv.slice(-4).map(l => `${l.spk || '?'}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
+    const recent = conv.slice(-3).map(l => `${l.spk || '?'}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
     return `Speaker roster so far: ${JSON.stringify(roster)}\nRecent dialogue, for context only (report what is on screen NOW, even if it repeats):\n${recent || '(none yet)'}`;
   }
 
@@ -802,7 +823,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
         contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: contextText() }] }],
-        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 900, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 450, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
       })
     });
     if (!r.ok) {
@@ -899,12 +920,12 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function perHour() {
     if (!sessionReqs) return null;
     const perReq = sessionCost / sessionReqs;
-    const reqPerSec = Math.min(1000 / S.iv, 2000 / avgLatency);   // never more than 2 requests in flight
+    const reqPerSec = Math.min(1000 / S.iv, 3000 / avgLatency) * (S.smartSkip ? 0.5 : 1);   // max 3 in flight; skip roughly halves looks
     return perReq * reqPerSec * 3600;
   }
   function updateCost() {
     const day = store.get('costDay', { d: today(), usd: 0 });
-    $('cost').textContent = sessionReqs ? (sessionCost === 0 ? 'free' : fmt(sessionCost)) : '';
+    $('cost').textContent = sessionReqs ? (sessionCost === 0 ? 'free' : fmt(sessionCost)) + ' · ' + (avgLatency / 1000).toFixed(1) + 's' : '';
     $('cost').classList.toggle('warn', S.budget > 0 && sessionCost > 0.8 * budgetMark);
     const ph = perHour();
     $('estnote').textContent = ph === null ? 'Cost per hour shows here after the first few translations.'
@@ -933,10 +954,33 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   updateCost();
 
   let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1, pauseUntil = 0;
+  // Change detector: a tiny map of bright, colourless (subtitle-like) pixels. Same map as the last look = same subtitle.
+  const sgc = document.createElement('canvas'), sgx = sgc.getContext('2d', { willReadFrequently: true });
+  let lastSig = null, lastSentAt = 0, skipped = 0;
+  function signature() {
+    const w = 160, h = Math.max(1, Math.round(cv.height * 160 / cv.width));
+    sgc.width = w; sgc.height = h; sgx.drawImage(cv, 0, 0, w, h);
+    const d = sgx.getImageData(0, 0, w, h).data, sig = new Uint8Array(w * h);
+    let n = 0;
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      if ((mx > 185 && mx - mn < 60) || (R > 180 && G > 160 && B < 110)) { sig[p] = 1; n++; }
+    }
+    return { sig, n };
+  }
+  function unchanged(cur) {
+    if (!lastSig || lastSig.sig.length !== cur.sig.length) return false;
+    let diff = 0; const a = lastSig.sig, b = cur.sig;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+    return diff / Math.max(40, Math.max(cur.n, lastSig.n)) < 0.2;
+  }
   const setStatus = t => { $('status').textContent = t; };
   async function tick() {
-    if (!live || document.hidden || inFlight >= (S.engine === 'free' ? 1 : 2) || Date.now() < pauseUntil) return;
+    if (!live || document.hidden || inFlight >= (S.engine === 'free' ? 1 : 3) || Date.now() < pauseUntil) return;
     const b64 = grab(); if (!b64) return;
+    const sg = signature();
+    if (S.smartSkip && unchanged(sg) && Date.now() - lastSentAt < 6000) { skipped++; return; }
+    lastSig = sg; lastSentAt = Date.now();
     const my = ++seq; inFlight++; $('dot').classList.add('busy');
     const t0 = Date.now();
     try {
