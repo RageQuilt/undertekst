@@ -11,44 +11,88 @@
 <title>Undertekst</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden; touch-action: manipulation;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-user-select: none; user-select: none; }
   #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
 
-  #out { position: fixed; left: 0; right: 0; top: 0; z-index: 10;
-    padding: calc(env(safe-area-inset-top) + 14px) 18px 14px; background: rgba(0,0,0,0.80); min-height: 100px; }
-  #en { font-size: var(--fs, 28px); line-height: 1.25; font-weight: 650; white-space: pre-line; min-height: 1.25em; transition: opacity .4s; }
-  #da { font-size: 14px; color: #aaa; margin-top: 6px; white-space: pre-line; }
-  #out.stale #en { opacity: 0.4; }
-  #status { font-size: 12px; color: #ffd400; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+  /* ---------- panels ---------- */
+  .panel { position: fixed; left: 0; right: 0; z-index: 10; display: flex; flex-direction: column;
+    background: rgba(0,0,0,0.86); }
+  #pEn { top: 0; padding-top: env(safe-area-inset-top); border-bottom: 1px solid #333; }
+  #pDa { bottom: 0; padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid #333; }
+  .scroll { flex: 1; overflow-y: auto; padding: 4px 14px 6px; -webkit-overflow-scrolling: touch; }
+  #sEn { font-size: var(--fsEn, 26px); font-weight: 600; }
+  #sDa { font-size: var(--fsDa, 20px); }
+  .grip { height: 24px; flex: none; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: ns-resize; }
+  .grip::before { content: ""; width: 44px; height: 5px; border-radius: 3px; background: #666; }
+  .head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 2px 14px; flex: none; }
+  .tag { font-size: 11px; letter-spacing: .08em; color: #888; font-weight: 700; }
+  #status { flex: 1; font-size: 12px; color: #ffd400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex: none; }
   #dot.busy { background: #ffd400; }
+  .ib { background: #222; border: 1px solid #444; color: #fff; border-radius: 10px; padding: 6px 10px; font-size: 14px; font-family: inherit; }
+  .ib.on { background: #ffd400; color: #000; border-color: #ffd400; font-weight: 700; }
 
-  #hist { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 20; overflow-y: auto;
-    padding: calc(env(safe-area-inset-top) + 16px) 16px 110px; display: none; }
-  #hist .item { border-bottom: 1px solid #333; padding: 10px 0; }
-  #hist .e { font-size: 18px; }
-  #hist .d { font-size: 13px; color: #999; margin-top: 3px; white-space: pre-line; }
+  .line { margin: 4px 0 8px; line-height: 1.3; opacity: 0.5; transition: opacity .3s; }
+  .line.cur { opacity: 1; }
+  .spk { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 6px; margin-right: 6px;
+    vertical-align: 3px; color: #000; min-width: 22px; text-align: center; font-family: inherit; }
+  .hidespk .spk { display: none; }
+  .w { border-radius: 4px; padding: 0 1px; cursor: pointer; }
+  .w.inbank { border-bottom: 1.5px dotted rgba(255,212,0,0.7); }
+  .w.hl { background: #ffd400; color: #000; }
+  .w.pulse { animation: pulse .8s ease-out; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,212,0,.75); } 100% { box-shadow: 0 0 0 9px rgba(255,212,0,0); } }
+  .empty { color: #777; font-size: 15px; font-weight: 400; padding-top: 4px; }
 
-  #bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; justify-content: center;
-    padding: 10px 10px calc(env(safe-area-inset-bottom) + 10px); background: rgba(0,0,0,0.55); z-index: 30; }
-  button, select, input[type=password], input[type=text] { font: inherit; color: #fff; background: #222;
-    border: 1px solid #444; border-radius: 12px; padding: 12px 14px; font-size: 15px; }
-  button.on { background: #ffd400; color: #000; border-color: #ffd400; font-weight: 700; }
+  .toast { position: fixed; z-index: 60; font-size: 12px; font-weight: 600; background: rgba(255,212,0,0.95); color: #000;
+    padding: 3px 9px; border-radius: 10px; pointer-events: none; animation: rise 1.1s ease-out forwards; white-space: nowrap; }
+  @keyframes rise { 0% { opacity: 0; transform: translate(-50%, 0); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -26px); } }
 
-  #settings { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: #111; border-top: 1px solid #333;
-    padding: 16px 16px calc(env(safe-area-inset-bottom) + 84px); display: none; }
-  #settings label { display: block; margin: 12px 0 4px; font-size: 14px; color: #ccc; }
+  /* ---------- overlays ---------- */
+  .overlay { position: fixed; inset: 0; z-index: 40; background: #0b0b0b; overflow-y: auto; display: none;
+    padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 30px); -webkit-user-select: text; user-select: text; }
+  .ohead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .ohead h2 { flex: 1; margin: 0; font-size: 22px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tabs button { flex: 1; }
+  button.big { font: inherit; font-size: 16px; padding: 12px; border-radius: 12px; border: 1px solid #444; background: #222; color: #fff; }
+  button.big.on { background: #ffd400; color: #000; border-color: #ffd400; font-weight: 700; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat { background: #181818; border-radius: 12px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 24px; }
+  .stat span { font-size: 12px; color: #999; }
+  .witem { border-bottom: 1px solid #222; padding: 10px 0; display: flex; gap: 10px; align-items: flex-start; }
+  .witem .main { flex: 1; min-width: 0; }
+  .witem .da { font-size: 18px; font-weight: 700; }
+  .witem .en { font-size: 16px; color: #ddd; }
+  .witem .meta { font-size: 12px; color: #888; margin-top: 3px; }
+  .witem .ctx { font-size: 13px; color: #999; margin-top: 4px; font-style: italic; display: none; }
+  .witem.open .ctx { display: block; }
+  .del { background: none; border: 0; color: #666; font-size: 20px; padding: 0 6px; }
+  .bar { height: 4px; background: #333; border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #4caf50; }
+  select, input[type=password] { font: inherit; color: #fff; background: #222; border: 1px solid #444; border-radius: 10px; padding: 10px; font-size: 15px; }
+  #settings label { display: block; margin: 14px 0 6px; font-size: 14px; color: #ccc; }
   #settings input[type=range], #settings select { width: 100%; }
-  .row { display: flex; gap: 8px; }
-  .row > * { flex: 1; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > button { flex: 1; }
 
-  #start { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column;
+  .q { font-size: 30px; font-weight: 700; text-align: center; margin: 18px 0 6px; }
+  .qsub { text-align: center; color: #999; font-size: 14px; margin-bottom: 4px; }
+  .qctx { text-align: center; color: #888; font-size: 14px; font-style: italic; margin: 8px 0 18px; }
+  .opts { display: grid; gap: 10px; }
+  .opts button { font: inherit; font-size: 18px; padding: 16px; border-radius: 14px; border: 1px solid #444; background: #1c1c1c; color: #fff; }
+  .opts button.right { background: #2e7d32; border-color: #2e7d32; }
+  .opts button.wrong { background: #8e2424; border-color: #8e2424; }
+  .qprog { color: #888; font-size: 13px; text-align: center; }
+
+  #start { position: fixed; inset: 0; z-index: 70; background: #000; display: flex; flex-direction: column;
     align-items: center; justify-content: center; padding: 24px; text-align: center; }
   #start h1 { margin: 0 0 8px; font-size: 32px; }
   #start p { color: #aaa; max-width: 420px; line-height: 1.45; margin: 8px 0; }
-  #start input { width: 100%; max-width: 420px; margin-top: 14px; }
-  #go { margin-top: 16px; font-size: 20px; padding: 16px 30px; background: #ffd400; color: #000; border: 0; font-weight: 700; }
+  #start input { width: 100%; max-width: 420px; margin-top: 14px; -webkit-user-select: text; user-select: text; }
+  #go { margin-top: 16px; font-size: 20px; padding: 16px 30px; background: #ffd400; color: #000; border: 0; border-radius: 14px; font-weight: 700; }
   #err { color: #ff6b6b; margin-top: 14px; max-width: 420px; line-height: 1.4; }
   a { color: #ffd400; }
 </style>
@@ -57,15 +101,55 @@
 
 <video id="video" playsinline muted autoplay></video>
 
-<div id="out">
-  <div id="en">Point your phone at the TV</div>
-  <div id="da"></div>
-  <div id="status"><span id="dot"></span><span id="stxt"></span></div>
+<!-- English: top -->
+<div class="panel" id="pEn">
+  <div class="head">
+    <span id="dot"></span><span class="tag">EN</span><span id="status"></span>
+    <button class="ib on" id="live">Live</button>
+    <button class="ib" id="bankbtn">Bank</button>
+    <button class="ib" id="setbtn">⚙</button>
+  </div>
+  <div class="scroll" id="sEn"><div class="empty">Point your phone at the TV</div></div>
+  <div class="grip" id="gEn"></div>
 </div>
 
-<div id="hist"></div>
+<!-- Danish: bottom -->
+<div class="panel" id="pDa">
+  <div class="grip" id="gDa"></div>
+  <div class="head" style="padding-top:0"><span class="tag">DA</span></div>
+  <div class="scroll" id="sDa"><div class="empty">Tap a word to see its match. Double-tap to save it.</div></div>
+</div>
 
-<div id="settings">
+<!-- Word bank -->
+<div class="overlay" id="bank">
+  <div class="ohead"><h2>Word bank</h2><button class="big" id="bankclose">Close</button></div>
+  <div class="tabs">
+    <button class="big on" id="tabWords">Words</button>
+    <button class="big" id="tabQuiz">Quiz</button>
+  </div>
+  <div id="vWords">
+    <div class="stats" id="stats"></div>
+    <div class="row" style="margin-bottom:8px">
+      <select id="sort" style="flex:1">
+        <option value="recent">Newest first</option>
+        <option value="weak">Weakest first</option>
+        <option value="seen">Most heard on TV</option>
+        <option value="az">A to Z</option>
+      </select>
+    </div>
+    <div id="wlist"></div>
+  </div>
+  <div id="vQuiz" style="display:none"></div>
+</div>
+
+<!-- Settings -->
+<div class="overlay" id="settings">
+  <div class="ohead"><h2>Settings</h2><button class="big" id="setclose">Close</button></div>
+  <label>English text size: <span id="fsEnv"></span></label>
+  <input type="range" id="fsEn" min="14" max="56">
+  <label>Danish text size: <span id="fsDav"></span></label>
+  <input type="range" id="fsDa" min="14" max="56">
+  <label class="row" style="color:#ccc"><input type="checkbox" id="showspk"> Show who is speaking (M1, W1…)</label>
   <label>AI model</label>
   <select id="model">
     <option value="claude-haiku-5-5">Fast (Claude Haiku), recommended</option>
@@ -77,21 +161,17 @@
     <label>Camera zoom: <span id="zoomv"></span></label>
     <input type="range" id="zoom" step="0.1">
   </div>
-  <label>Text size</label>
-  <div class="row"><button id="fsminus">A−</button><button id="fsplus">A+</button></div>
+  <label>Conversation</label>
+  <div class="row"><button class="big" id="clearconv">Clear conversation</button></div>
+  <label>Word bank backup</label>
+  <div class="row"><button class="big" id="exportbank">Copy bank as text</button></div>
   <label>API key</label>
-  <div class="row"><button id="forget">Forget my API key</button></div>
-</div>
-
-<div id="bar">
-  <button id="live" class="on">Live</button>
-  <button id="histbtn">History</button>
-  <button id="setbtn">Settings</button>
+  <div class="row"><button class="big" id="forget">Forget my API key</button></div>
 </div>
 
 <div id="start">
   <h1>Undertekst</h1>
-  <p>Point your phone at the TV. AI finds the Danish subtitles anywhere in the picture and shows them in English, live.</p>
+  <p>Point your phone at the TV. English appears on top, Danish below. Tap a word to see its match, double-tap to save it to your word bank.</p>
   <input id="key" type="password" placeholder="Paste your Anthropic API key (sk-ant-...)" autocomplete="off">
   <p style="font-size:13px">Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. It stays on this phone only.</p>
   <button id="go">Start</button>
@@ -101,48 +181,315 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const video = $('video'), enEl = $('en'), daEl = $('da'), stxt = $('stxt'), dot = $('dot'), outEl = $('out');
+  const video = $('video'), sEn = $('sEn'), sDa = $('sDa'), pEn = $('pEn'), pDa = $('pDa');
 
+  // ---------- storage ----------
   const store = {
-    get(k, d) { try { const v = localStorage.getItem('ut2_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-    set(k, v) { try { localStorage.setItem('ut2_' + k, JSON.stringify(v)); } catch (e) {} },
-    del(k) { try { localStorage.removeItem('ut2_' + k); } catch (e) {} }
+    get(k, d) { try { const v = localStorage.getItem('ut3_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('ut3_' + k, JSON.stringify(v)); } catch (e) {} },
+    del(k) { try { localStorage.removeItem('ut3_' + k); } catch (e) {} }
   };
+  // carry the key over from the previous version
+  let oldKey = ''; try { oldKey = JSON.parse(localStorage.getItem('ut2_key') || '""'); } catch (e) {}
   const S = {
-    key: store.get('key', ''), model: store.get('model', 'claude-haiku-5-5'),
-    iv: store.get('iv', 1000), fs: store.get('fs', 28)
+    key: store.get('key', oldKey), model: store.get('model', 'claude-haiku-5-5'), iv: store.get('iv', 1000),
+    fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
+    hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
-  $('key').value = S.key;
-  $('model').value = S.model;
-  $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
-  document.documentElement.style.setProperty('--fs', S.fs + 'px');
+  let bank = store.get('bank', {});
+  const saveBank = () => store.set('bank', bank);
 
-  // ---------- controls ----------
+  // ---------- layout: draggable panels ----------
+  function layout() {
+    const H = window.innerHeight;
+    S.hEn = Math.min(Math.max(S.hEn, 0.14), 0.86);
+    S.hDa = Math.min(Math.max(S.hDa, 0.12), 0.86);
+    const maxSum = 0.94;
+    if (S.hEn + S.hDa > maxSum) {
+      if (dragging === 'en') S.hDa = Math.max(0.12, maxSum - S.hEn); else S.hEn = Math.max(0.14, maxSum - S.hDa);
+      if (S.hEn + S.hDa > maxSum) { if (dragging === 'en') S.hEn = maxSum - S.hDa; else S.hDa = maxSum - S.hEn; }
+    }
+    pEn.style.height = (S.hEn * H) + 'px';
+    pDa.style.height = (S.hDa * H) + 'px';
+  }
+  let dragging = null;
+  function makeDrag(grip, which) {
+    let y0 = 0, h0 = 0;
+    grip.addEventListener('pointerdown', e => {
+      dragging = which; y0 = e.clientY; h0 = which === 'en' ? S.hEn : S.hDa; grip.setPointerCapture(e.pointerId);
+    });
+    grip.addEventListener('pointermove', e => {
+      if (dragging !== which) return;
+      const dy = (e.clientY - y0) / window.innerHeight;
+      if (which === 'en') S.hEn = h0 + dy; else S.hDa = h0 - dy;
+      layout(); stickBottom(sEn, true); stickBottom(sDa, true);
+    });
+    const end = () => { if (dragging === which) { store.set('hEn', S.hEn); store.set('hDa', S.hDa); } dragging = null; };
+    grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  }
+  makeDrag($('gEn'), 'en'); makeDrag($('gDa'), 'da');
+  window.addEventListener('resize', layout);
+  layout();
+
+  function applyFonts() {
+    document.documentElement.style.setProperty('--fsEn', S.fsEn + 'px');
+    document.documentElement.style.setProperty('--fsDa', S.fsDa + 'px');
+    $('fsEn').value = S.fsEn; $('fsEnv').textContent = S.fsEn;
+    $('fsDa').value = S.fsDa; $('fsDav').textContent = S.fsDa;
+  }
+  applyFonts();
+  $('fsEn').oninput = e => { S.fsEn = +e.target.value; store.set('fsEn', S.fsEn); applyFonts(); };
+  $('fsDa').oninput = e => { S.fsDa = +e.target.value; store.set('fsDa', S.fsDa); applyFonts(); };
+  $('showspk').checked = S.showSpk;
+  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk); };
+  applySpk();
+  $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
+  $('model').value = S.model;
+  $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
+  $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
+  $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
+  $('forget').onclick = () => { store.del('key'); try { localStorage.removeItem('ut2_key'); } catch (e) {} location.reload(); };
+  $('clearconv').onclick = () => { conv.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = ''; $('settings').style.display = 'none'; };
+  $('exportbank').onclick = async () => {
+    const txt = Object.values(bank).map(b => `${b.da}\t${b.en}\t${b.ctxDa || ''}`).join('\n');
+    try { await navigator.clipboard.writeText(txt); $('exportbank').textContent = 'Copied!'; }
+    catch (e) { $('exportbank').textContent = 'Copy failed'; }
+    setTimeout(() => $('exportbank').textContent = 'Copy bank as text', 1500);
+  };
+
   let live = true;
   $('live').onclick = () => { live = !live; $('live').classList.toggle('on', live); $('live').textContent = live ? 'Live' : 'Paused'; };
-  const toggle = (panel, btn) => () => {
-    const p = $(panel), open = p.style.display === 'block';
-    if (!open && panel === 'hist') renderHist();
-    p.style.display = open ? 'none' : 'block'; $(btn).classList.toggle('on', !open);
-  };
-  $('histbtn').onclick = toggle('hist', 'histbtn');
-  $('setbtn').onclick = toggle('settings', 'setbtn');
-  $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
-  $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
-  const setFs = v => { S.fs = Math.min(Math.max(v, 16), 60); store.set('fs', S.fs); document.documentElement.style.setProperty('--fs', S.fs + 'px'); };
-  $('fsminus').onclick = () => setFs(S.fs - 3);
-  $('fsplus').onclick = () => setFs(S.fs + 3);
-  $('forget').onclick = () => { store.del('key'); location.reload(); };
+  $('setbtn').onclick = () => { $('settings').style.display = 'block'; };
+  $('setclose').onclick = () => { $('settings').style.display = 'none'; };
+  $('bankbtn').onclick = () => { $('bank').style.display = 'block'; showWords(); };
+  $('bankclose').onclick = () => { $('bank').style.display = 'none'; refreshBankMarks(); };
 
-  const history = [];
-  function renderHist() {
-    const h = $('hist'); h.innerHTML = history.length ? '' : '<div style="color:#999">Nothing translated yet.</div>';
-    for (let i = history.length - 1; i >= 0; i--) {
-      const d = document.createElement('div'); d.className = 'item';
-      const a = document.createElement('div'); a.className = 'e'; a.textContent = history[i].en;
-      const b = document.createElement('div'); b.className = 'd'; b.textContent = history[i].da;
-      d.append(a, b); h.appendChild(d);
+  // ---------- conversation model ----------
+  const conv = [];            // {id, spk, da:[[w,g]], en:[[w,g]], t}
+  let roster = {};            // { M1: "description", ... }
+  let lastDaText = '', lineId = 0;
+
+  const SPK_COLORS = { M: ['#7cc4ff', '#5ad1a4', '#b9a3ff', '#9fd36b'], W: ['#ff9ec7', '#ffb36b', '#ff8a80', '#f5d76e'] };
+  function spkColor(tag) {
+    const m = /^([MW])(\d+)/.exec(tag || ''); if (!m) return '#bbb';
+    const arr = SPK_COLORS[m[1]]; return arr[(parseInt(m[2], 10) - 1) % arr.length];
+  }
+  const clean = w => (w || '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  const norm = t => (t || '').toLowerCase().replace(/[^a-zæøåéü0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+  function isPunct(w) { return /^[^\p{L}\p{N}]+$/u.test(w); }
+  function renderLine(line, lang) {
+    const div = document.createElement('div'); div.className = 'line cur'; div.dataset.lid = line.id;
+    const tag = document.createElement('span'); tag.className = 'spk'; tag.textContent = line.spk || '?';
+    tag.style.background = spkColor(line.spk); div.appendChild(tag);
+    const toks = lang === 'en' ? line.en : line.da;
+    toks.forEach((t, i) => {
+      const w = String(t[0]);
+      if (i > 0 && !isPunct(w)) div.appendChild(document.createTextNode(' '));
+      const s = document.createElement('span'); s.className = 'w'; s.textContent = w;
+      s.dataset.lid = line.id; s.dataset.g = String(t[1] || 0); s.dataset.lang = lang;
+      if (lang === 'da' && bank[norm(clean(w))]) s.classList.add('inbank');
+      div.appendChild(s);
+    });
+    return div;
+  }
+  function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
+  function stickBottom(el, force) { if (force || nearBottom(el)) el.scrollTop = el.scrollHeight; }
+
+  function addLines(lines) {
+    const stickEn = nearBottom(sEn), stickDa = nearBottom(sDa);
+    sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
+    sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    for (const l of lines) {
+      const line = { id: ++lineId, spk: l.spk, da: l.da, en: l.en, t: Date.now() };
+      conv.push(line);
+      sEn.appendChild(renderLine(line, 'en'));
+      sDa.appendChild(renderLine(line, 'da'));
+      countSeen(line);
     }
+    while (conv.length > 600) {
+      const old = conv.shift();
+      sEn.querySelectorAll(`.line[data-lid="${old.id}"]`).forEach(e => e.remove());
+      sDa.querySelectorAll(`.line[data-lid="${old.id}"]`).forEach(e => e.remove());
+    }
+    stickBottom(sEn, stickEn); stickBottom(sDa, stickDa);
+  }
+
+  // ---------- tap = highlight, double-tap = save ----------
+  let lastTap = { el: null, t: 0 };
+  function onTap(e) {
+    const el = e.target.closest('.w'); if (!el) { clearHL(); return; }
+    const now = Date.now();
+    if (lastTap.el === el && now - lastTap.t < 380) { saveWord(el); lastTap = { el: null, t: 0 }; return; }
+    lastTap = { el, t: now };
+    highlight(el);
+  }
+  sEn.addEventListener('click', onTap); sDa.addEventListener('click', onTap);
+  function clearHL() { document.querySelectorAll('.w.hl').forEach(x => x.classList.remove('hl')); }
+  function partners(el) {
+    const { lid, g } = el.dataset;
+    if (g === '0') return [el];
+    return [...document.querySelectorAll(`.w[data-lid="${lid}"][data-g="${g}"]`)];
+  }
+  function highlight(el) {
+    clearHL();
+    const ps = partners(el); ps.forEach(x => x.classList.add('hl'));
+    // bring the matching word into view in the other panel
+    const other = ps.find(x => x.dataset.lang !== el.dataset.lang);
+    if (other) other.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function saveWord(el) {
+    const line = conv.find(l => String(l.id) === el.dataset.lid); if (!line) return;
+    const g = el.dataset.g;
+    let da, en;
+    if (g !== '0') {
+      da = line.da.filter(t => String(t[1]) === g).map(t => clean(t[0])).join(' ');
+      en = line.en.filter(t => String(t[1]) === g).map(t => clean(t[0])).join(' ');
+    } else if (el.dataset.lang === 'da') { da = clean(el.textContent); en = ''; }
+    else { en = clean(el.textContent); da = ''; }
+    if (!da && !en) return;
+    const key = da ? norm(da) : 'en:' + norm(en);
+    const ctxDa = line.da.map(t => t[0]).join(' '), ctxEn = line.en.map(t => t[0]).join(' ');
+    const b = bank[key];
+    if (b) { b.saves = (b.saves || 1) + 1; if (!b.en && en) b.en = en; }
+    else bank[key] = { da, en, ctxDa, ctxEn, saved: Date.now(), saves: 1, seen: 1, right: 0, wrong: 0 };
+    saveBank();
+    // subtle feedback: a pulse on the word(s), a small fading label, a tiny tick on Android
+    partners(el).forEach(x => { x.classList.remove('pulse'); void x.offsetWidth; x.classList.add('pulse'); if (x.dataset.lang === 'da') x.classList.add('inbank'); });
+    const r = el.getBoundingClientRect();
+    const t = document.createElement('div'); t.className = 'toast';
+    t.textContent = b ? 'already saved' : '+ saved';
+    t.style.left = (r.left + r.width / 2) + 'px'; t.style.top = (r.top - 22) + 'px';
+    document.body.appendChild(t); setTimeout(() => t.remove(), 1200);
+    try { navigator.vibrate && navigator.vibrate(12); } catch (e) {}
+  }
+
+  function countSeen(line) {
+    const daText = ' ' + norm(line.da.map(t => clean(t[0])).join(' ')) + ' ';
+    let changed = false;
+    for (const k in bank) {
+      if (k.startsWith('en:')) continue;
+      if (daText.includes(' ' + k + ' ')) { bank[k].seen = (bank[k].seen || 0) + 1; bank[k].lastSeen = Date.now(); changed = true; }
+    }
+    if (changed) saveBank();
+  }
+  function refreshBankMarks() {
+    document.querySelectorAll('.w[data-lang="da"]').forEach(s => s.classList.toggle('inbank', !!bank[norm(clean(s.textContent))]));
+  }
+
+  // ---------- word bank view ----------
+  $('tabWords').onclick = showWords;
+  $('tabQuiz').onclick = startQuiz;
+  $('sort').onchange = showWords;
+  function acc(b) { const n = (b.right || 0) + (b.wrong || 0); return n ? (b.right || 0) / n : null; }
+  function mastered(b) { const a = acc(b); return (b.right || 0) >= 3 && a !== null && a >= 0.8; }
+  function showWords() {
+    $('tabWords').classList.add('on'); $('tabQuiz').classList.remove('on');
+    $('vWords').style.display = 'block'; $('vQuiz').style.display = 'none';
+    const items = Object.entries(bank);
+    const week = Date.now() - 7 * 864e5;
+    const totR = items.reduce((s, [, b]) => s + (b.right || 0), 0), totW = items.reduce((s, [, b]) => s + (b.wrong || 0), 0);
+    $('stats').innerHTML = '';
+    [[items.length, 'words saved'], [items.filter(([, b]) => b.saved > week).length, 'saved this week'],
+     [totR + totW ? Math.round(100 * totR / (totR + totW)) + '%' : '–', 'quiz accuracy'],
+     [items.filter(([, b]) => mastered(b)).length, 'mastered']].forEach(([v, l]) => {
+      const d = document.createElement('div'); d.className = 'stat';
+      const bb = document.createElement('b'); bb.textContent = v; const sp = document.createElement('span'); sp.textContent = l;
+      d.append(bb, sp); $('stats').appendChild(d);
+    });
+    const mode = $('sort').value;
+    items.sort((a, b) => {
+      const A = a[1], B = b[1];
+      if (mode === 'weak') return (acc(A) ?? -1) - (acc(B) ?? -1) || (B.wrong || 0) - (A.wrong || 0);
+      if (mode === 'seen') return (B.seen || 0) - (A.seen || 0);
+      if (mode === 'az') return (A.da || A.en).localeCompare(B.da || B.en, 'da');
+      return B.saved - A.saved;
+    });
+    const list = $('wlist'); list.innerHTML = '';
+    if (!items.length) { list.innerHTML = '<div class="empty" style="padding:20px 0">No words yet. Double-tap any word in the subtitles to save it.</div>'; return; }
+    for (const [k, b] of items) {
+      const row = document.createElement('div'); row.className = 'witem';
+      const main = document.createElement('div'); main.className = 'main';
+      const da = document.createElement('div'); da.className = 'da'; da.textContent = b.da || '(English only)';
+      const en = document.createElement('div'); en.className = 'en'; en.textContent = b.en || '–';
+      const a = acc(b);
+      const meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = `heard ${b.seen || 0}× · quiz ${b.right || 0}/${(b.right || 0) + (b.wrong || 0)}` + (mastered(b) ? ' · mastered' : '');
+      const bar = document.createElement('div'); bar.className = 'bar';
+      const fill = document.createElement('i'); fill.style.width = (a === null ? 0 : Math.round(a * 100)) + '%'; bar.appendChild(fill);
+      const ctx = document.createElement('div'); ctx.className = 'ctx'; ctx.textContent = `"${b.ctxDa}" → "${b.ctxEn}"`;
+      main.append(da, en, meta, bar, ctx);
+      main.onclick = () => row.classList.toggle('open');
+      const del = document.createElement('button'); del.className = 'del'; del.textContent = '×';
+      del.onclick = () => { delete bank[k]; saveBank(); showWords(); };
+      row.append(main, del); list.appendChild(row);
+    }
+  }
+
+  // ---------- quiz ----------
+  let quiz = null;
+  function pickWeighted(arr, n) {
+    const pool = arr.map(([k, b]) => ({ k, b, w: ((b.wrong || 0) + 1) / ((b.right || 0) + 1) + (mastered(b) ? 0 : 0.5) }));
+    const out = [];
+    while (out.length < n && pool.length) {
+      const tot = pool.reduce((s, p) => s + p.w, 0); let r = Math.random() * tot, i = 0;
+      while (r > pool[i].w && i < pool.length - 1) { r -= pool[i].w; i++; }
+      out.push(pool.splice(i, 1)[0]);
+    }
+    return out;
+  }
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  function startQuiz() {
+    $('tabQuiz').classList.add('on'); $('tabWords').classList.remove('on');
+    $('vWords').style.display = 'none'; $('vQuiz').style.display = 'block';
+    const usable = Object.entries(bank).filter(([, b]) => b.da && b.en);
+    const v = $('vQuiz'); v.innerHTML = '';
+    if (usable.length < 4) {
+      v.innerHTML = `<div class="empty" style="padding:20px 0">Save at least 4 words with a translation to unlock quizzes (you have ${usable.length}).</div>`;
+      return;
+    }
+    quiz = { usable, qs: pickWeighted(usable, Math.min(10, usable.length)), i: 0, score: 0 };
+    nextQ();
+  }
+  function nextQ() {
+    const v = $('vQuiz'); v.innerHTML = '';
+    if (quiz.i >= quiz.qs.length) {
+      v.innerHTML = '';
+      const q = document.createElement('div'); q.className = 'q'; q.textContent = `${quiz.score} / ${quiz.qs.length}`;
+      const s = document.createElement('div'); s.className = 'qsub'; s.textContent = quiz.score === quiz.qs.length ? 'Perfekt!' : 'Words you missed will come up more often.';
+      const again = document.createElement('button'); again.className = 'big on'; again.style.width = '100%'; again.style.marginTop = '20px';
+      again.textContent = 'Another round'; again.onclick = startQuiz;
+      v.append(q, s, again); return;
+    }
+    const { k, b } = quiz.qs[quiz.i];
+    const daToEn = Math.random() < 0.6;
+    const prompt = daToEn ? b.da : b.en, answer = daToEn ? b.en : b.da;
+    const others = shuffle(quiz.usable.filter(([kk, bb]) => kk !== k && norm(daToEn ? bb.en : bb.da) !== norm(answer)))
+      .slice(0, 3).map(([, bb]) => daToEn ? bb.en : bb.da);
+    const opts = shuffle([answer, ...others]);
+    const prog = document.createElement('div'); prog.className = 'qprog'; prog.textContent = `Question ${quiz.i + 1} of ${quiz.qs.length}`;
+    const sub = document.createElement('div'); sub.className = 'qsub'; sub.textContent = daToEn ? 'What does this mean in English?' : 'How do you say this in Danish?';
+    const q = document.createElement('div'); q.className = 'q'; q.textContent = prompt;
+    const ctx = document.createElement('div'); ctx.className = 'qctx';
+    ctx.textContent = daToEn && b.ctxDa ? `"${b.ctxDa}"` : '';
+    const box = document.createElement('div'); box.className = 'opts';
+    let done = false;
+    for (const o of opts) {
+      const btn = document.createElement('button'); btn.textContent = o;
+      btn.onclick = () => {
+        if (done) return; done = true;
+        const ok = o === answer;
+        if (ok) { quiz.score++; b.right = (b.right || 0) + 1; } else { b.wrong = (b.wrong || 0) + 1; btn.classList.add('wrong'); }
+        b.lastQuiz = Date.now(); saveBank();
+        [...box.children].forEach(c => { if (c.textContent === answer) c.classList.add('right'); });
+        if (!daToEn && b.ctxDa) ctx.textContent = `"${b.ctxDa}"`;
+        setTimeout(() => { quiz.i++; nextQ(); }, ok ? 700 : 1600);
+      };
+      box.appendChild(btn);
+    }
+    v.append(prog, sub, q, ctx, box);
   }
 
   // ---------- camera ----------
@@ -166,7 +513,6 @@
   async function keepAwake() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {} }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
 
-  // ---------- frame grab (whole camera view) ----------
   const cv = document.createElement('canvas'), cx = cv.getContext('2d');
   function grab() {
     const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
@@ -176,29 +522,31 @@
   }
 
   // ---------- AI ----------
-  const SYSTEM = `You are a live subtitle translator. Each image is a phone-camera photo of a TV or screen showing Danish programming.
-Find the dialogue subtitles in the picture (usually 1-2 lines of white or yellow text near the bottom of the TV image, but they can be anywhere; the TV may be small, tilted or off-centre in the photo).
-Read the Danish subtitle text and translate it into natural, idiomatic English.
-Ignore channel logos, clocks, tickers, menus and any other on-screen text that is not dialogue subtitles.
-If two speakers are shown with dashes, keep them on separate lines.
-Reply with JSON only, no other text: {"da":"<Danish subtitle as shown>","en":"<English translation>"}
-If no subtitle is visible or it is unreadable, reply exactly: {"da":"","en":""}`;
+  const SYSTEM = `You are a live subtitle translator and dialogue tracker. Each image is a phone-camera photo of a TV showing Danish programming with Danish subtitles.
 
-  let lastDa = '';
+1. Find the dialogue subtitles (usually 1-2 lines of white or yellow text near the bottom of the TV picture; the TV may be small, tilted or off-centre). Ignore logos, clocks, tickers, menus and any other text that is not dialogue.
+2. Split the subtitle into speaker lines. A leading dash usually marks a new speaker. A sentence wrapped over two lines by one speaker is ONE line.
+3. Decide who says each line, as best you can, from who is on screen, who appears to be talking, the dashes and the conversation so far. Tag speakers M (man) or W (woman) plus a number in order of first appearance: M1, M2, W1, W2. Reuse the roster tags for people you have seen before. If you cannot tell at all, use "?".
+4. Translate each line into natural, idiomatic English.
+5. Word alignment: give Danish and English as arrays of [word, group] pairs in reading order. Attach punctuation to the neighbouring word (no separate punctuation tokens) and drop leading dialogue dashes. Words that translate each other share the same group number (1, 2, 3...). A group may cover several words on either side (e.g. "har lyst til" = "want to"). Use group 0 for words with no counterpart.
+
+Reply with JSON only, no other text:
+{"lines":[{"spk":"W1","da":[["Hvor",1],["er",2],["du?",3]],"en":[["Where",1],["are",2],["you?",3]]}],"roster":{"W1":"blonde woman, green jacket"}}
+"roster" lists every speaker tag used so far with a short visual description (3-6 words) so you can recognise them in later frames.
+If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
+
   async function ask(b64) {
-    const ctx = lastDa ? `Previous subtitle, for context only (do not repeat it unless it is still on screen): "${lastDa}"` : 'Translate the subtitle.';
+    const recent = conv.slice(-4).map(l => `${l.spk}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
+    const ctx = `Speaker roster so far: ${JSON.stringify(roster)}\nRecent dialogue, for context only (report what is on screen NOW, even if it repeats):\n${recent || '(none yet)'}`;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: S.model, max_tokens: 300, system: SYSTEM,
+        model: S.model, max_tokens: 900, system: SYSTEM,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-          { type: 'text', text: ctx }
-        ] }]
+          { type: 'text', text: ctx } ] }]
       })
     });
     if (!r.ok) {
@@ -207,69 +555,64 @@ If no subtitle is visible or it is unreadable, reply exactly: {"da":"","en":""}`
     }
     const j = await r.json();
     const t = (j.content || []).map(c => c.text || '').join('');
-    const m = t.match(/\{[\s\S]*\}/);
-    if (!m) return { da: '', en: '' };
-    try { const o = JSON.parse(m[0]); return { da: (o.da || '').trim(), en: (o.en || '').trim() }; }
-    catch (e) { return { da: '', en: '' }; }
+    const m = t.match(/\{[\s\S]*\}/); if (!m) return { lines: [] };
+    let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [] }; }
+    const ok = a => Array.isArray(a) && a.length && a.every(x => Array.isArray(x) && x.length >= 1);
+    const lines = (Array.isArray(o.lines) ? o.lines : []).filter(l => ok(l.da) && ok(l.en))
+      .map(l => ({ spk: String(l.spk || '?').slice(0, 4), da: l.da.map(x => [String(x[0]), +x[1] || 0]), en: l.en.map(x => [String(x[0]), +x[1] || 0]) }));
+    return { lines, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
   }
 
-  const norm = t => t.toLowerCase().replace(/[^a-zæøåéü]/g, '');
   function similar(a, b) {
-    a = norm(a); b = norm(b); if (!a || !b) return false; if (a === b) return true;
+    a = norm(a).replace(/ /g, ''); b = norm(b).replace(/ /g, ''); if (!a || !b) return false; if (a === b) return true;
     if (a.length < 3 || b.length < 3) return false;
     const m = new Map(); for (let i = 0; i < a.length - 1; i++) { const g = a.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
     let hit = 0; for (let i = 0; i < b.length - 1; i++) { const g = b.substr(i, 2), c = m.get(g); if (c) { hit++; m.set(g, c - 1); } }
     return 2 * hit / (a.length + b.length - 2) > 0.8;
   }
 
-  // ---------- live loop: overlapping requests, newest answer wins ----------
   let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1;
-  function setStatus(t) { stxt.textContent = t; }
-
+  const setStatus = t => { $('status').textContent = t; };
   async function tick() {
     if (!live || document.hidden || inFlight >= 2) return;
     const b64 = grab(); if (!b64) return;
-    const my = ++seq; inFlight++; dot.classList.add('busy');
+    const my = ++seq; inFlight++; $('dot').classList.add('busy');
     try {
       const res = await ask(b64);
       backoff = 1;
-      if (my < shownSeq) return;          // an answer to a newer frame already arrived
-      if (res.en) {
-        shownSeq = my; lastHit = Date.now(); outEl.classList.remove('stale'); setStatus('');
-        if (!similar(res.da, lastDa)) {
-          enEl.textContent = res.en; daEl.textContent = res.da; lastDa = res.da;
-          history.push(res); if (history.length > 300) history.shift();
-        }
-      } else if (Date.now() - lastHit > 4000) {
-        outEl.classList.add('stale');
-        setStatus('Looking for subtitles…');
-      }
+      if (my < shownSeq) return;
+      if (res.lines.length) {
+        shownSeq = my; lastHit = Date.now(); setStatus('');
+        if (res.roster) roster = Object.assign(roster, res.roster);
+        const daText = res.lines.map(l => l.da.map(t => t[0]).join(' ')).join(' ');
+        if (!similar(daText, lastDaText)) { lastDaText = daText; addLines(res.lines); }
+      } else if (Date.now() - lastHit > 4000) setStatus('Looking for subtitles…');
     } catch (e) {
-      if (e.status === 401) { setStatus('API key rejected. Settings → Forget my API key, then paste a valid one.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
-      else if (e.status === 429 || e.status === 529) { backoff = Math.min(backoff * 1.6, 6); setStatus('AI is busy, slowing down a little…'); }
-      else if (e.status === 400 && /credit|billing/i.test(e.message)) { setStatus('No API credit. Add credit at console.anthropic.com → Billing.'); }
-      else setStatus('Problem: ' + (e.message || e) + ' (retrying)');
-    } finally {
-      inFlight--; if (!inFlight) dot.classList.remove('busy');
-    }
+      if (e.status === 401) { setStatus('API key rejected. Settings → Forget my API key.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
+      else if (e.status === 429 || e.status === 529) { backoff = Math.min(backoff * 1.6, 6); setStatus('AI busy, slowing down…'); }
+      else if (/credit|billing/i.test(e.message)) setStatus('No API credit. Add credit at console.anthropic.com → Billing.');
+      else setStatus('Problem: ' + (e.message || e));
+    } finally { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); }
   }
-  async function loop() {
-    for (;;) { tick(); await new Promise(r => setTimeout(r, S.iv * backoff)); }
-  }
+  async function loop() { for (;;) { tick(); await new Promise(r => setTimeout(r, S.iv * backoff)); } }
+
+  // test hook: lets a page preview run without a camera or API key
+  window.__ut = { addLines, bank: () => bank };
 
   // ---------- start ----------
+  $('key').value = S.key || '';
   $('go').onclick = async () => {
     const err = $('err'); err.textContent = '';
     const k = $('key').value.trim();
     if (!k.startsWith('sk-ant-')) { err.textContent = 'Paste your Anthropic API key first (it starts with sk-ant-).'; return; }
     if (!window.isSecureContext || !navigator.mediaDevices) {
-      err.textContent = 'The camera only works from an https:// link opened in Safari or Chrome, not from a downloaded file or inside another app.'; return;
+      err.textContent = 'The camera only works from an https:// link opened in Safari or Chrome.'; return;
     }
     S.key = k; store.set('key', k);
     $('go').disabled = true; $('go').textContent = 'Starting…';
     try { await startCamera(); }
     catch (e) {
-      err.textContent = 'Camera blocked (' + (e.name || e.message) + '). Allow camera for this site: iPhone: aA button → Website Settings → Camera → Allow. Android: icon left of the address → Permissions → Camera → Allow. Then reload.';
+      err.textContent = 'Camera blocked (' + (e.name || e.message) + '). Allow camera for this site in your browser settings, then reload.';
       $('go').disabled = false; $('go').textContent = 'Start'; return;
     }
     $('start').style.display = 'none';
