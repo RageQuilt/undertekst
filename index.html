@@ -70,6 +70,14 @@
   #quick button { pointer-events: auto; background: rgba(20,20,20,0.75); backdrop-filter: blur(4px); }
   #quick button.on { background: #ffd400; color: #000; }
   #diag { position: fixed; left: 8px; z-index: 13; font: 11px ui-monospace, monospace; color: #9f9; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 6px; display: none; pointer-events: none; white-space: pre; }
+  .fade { transition: opacity .5s; }
+  body.idle .fade { opacity: 0; pointer-events: none !important; }
+  body.idle .fade button { pointer-events: none !important; }
+  #study { position: fixed; left: 50%; transform: translateX(-50%); z-index: 14; display: none; text-align: center; }
+  #study button { font: inherit; font-size: 18px; font-weight: 700; padding: 12px 22px; border-radius: 22px; border: 0; background: #ffd400; color: #000; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  #study .bar { height: 4px; background: rgba(255,255,255,.25); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  #study .bar i { display: block; height: 100%; background: #ffd400; width: 0; }
+  .line.study { border-left: 3px solid #ffd400; padding-left: 8px; }
   #card { position: fixed; left: 12px; right: 12px; z-index: 57; background: #161616; border: 1px solid #ffd400; border-radius: 16px;
     padding: 14px 16px; display: none; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,.6); -webkit-user-select: text; user-select: text; }
   #card .ct { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
@@ -153,18 +161,19 @@
 <div class="panel" id="pDa">
   <div class="grip" id="gDa"></div>
   <div class="head" style="padding-top:0"><span class="tag" style="flex:1">DA</span>
-    <span id="tvRemote" style="display:none;gap:6px">
+    <span id="tvRemote" class="fade" style="display:none;gap:6px">
       <button class="ib" id="tvRew">⏪10</button><button class="ib" id="tvPP">⏸</button><button class="ib" id="tvFf">10⏩</button>
     </span></div>
   <div class="scroll" id="sDa"><div class="empty">Tap a word to see its match. Double-tap to save it.</div></div>
   <div class="grip" id="gDaB"></div>
 </div>
 <div id="zoomtip"></div>
-<div id="quick">
-  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button>
+<div id="quick" class="fade">
+  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button><button class="ib" id="qStudy">📖 Off</button>
 </div>
 <div id="card"></div>
 <div id="diag"></div>
+<div id="study"><button id="studyGo">▶ Continue</button><div class="bar"><i id="studyBar"></i></div></div>
 
 <!-- Word bank -->
 <div class="overlay" id="bank">
@@ -246,6 +255,19 @@
     <label>Camera zoom: <span id="zoomv"></span></label>
     <input type="range" id="zoom" step="0.1">
   </div>
+  <label>📖 Study pause (needs the TV remote below)</label>
+  <select id="studyMode" style="width:100%">
+    <option value="off">Off</option>
+    <option value="each">Pause after every line</option>
+    <option value="long">Pause after long lines only (7+ words)</option>
+  </select>
+  <select id="studyResume" style="width:100%;margin-top:8px">
+    <option value="tap">Continue when I tap ▶</option>
+    <option value="auto">Continue by itself after a reading pause</option>
+  </select>
+  <label>Reading pause: <span id="studySpeedv"></span> per word</label>
+  <input type="range" id="studySpeed" min="0.2" max="1.2" step="0.1">
+  <div class="note">The TV pauses when a line has finished, so you can read the English and Danish. While paused, the app ignores Netflix's pause screen.</div>
   <label>TV remote</label>
   <select id="tvType" style="width:100%">
     <option value="none">Off</option>
@@ -322,7 +344,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), rpm: store.get('rpm', 45), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   const saveBank = () => store.set('bank', bank);
@@ -818,6 +840,18 @@
     cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H);
     return cv.toDataURL('image/jpeg', 0.8).split(',')[1];
   }
+  // Same picture, but encoded in the background so the screen never stutters
+  async function grabAsync() {
+    const c = cropRect(); if (!c) return null;
+    const { x0, y0, sw, sh } = c;
+    const k = Math.min(1, 1000 / Math.max(sw, sh));
+    const W = Math.round(sw * k), H = Math.round(sh * k);
+    cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H);
+    if (!cv.toBlob) return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.78));
+    if (!blob) return null;
+    return await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.onerror = () => r(null); fr.readAsDataURL(blob); });
+  }
 
   // ---------- network with timeout ----------
   async function fetchT(url, opts, ms) {
@@ -1096,10 +1130,22 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       else if (y1 >= 0 && y0 - y > Math.max(4, h * 0.05)) break;     // gap ends the band (allows the space between two subtitle lines)
     }
     let n = 0; const col = new Float32Array(w), brow = new Float32Array(Math.max(1, y1 - y0 + 1));
+    let trans = 0, span = 0;
     if (y1 >= 0 && y1 - y0 >= 2) {
-      for (let y = y0; y <= y1; y++) for (let x = 0; x < w; x++) if (mask[y * w + x]) { col[x]++; brow[y - y0]++; n++; }
+      for (let y = y0; y <= y1; y++) {
+        let xmin = -1, xmax = -1, prev = 0;
+        for (let x = 0; x < w; x++) {
+          const v = mask[y * w + x];
+          if (v) { col[x]++; brow[y - y0]++; n++; if (xmin < 0) xmin = x; xmax = x; if (!prev) trans++; }
+          prev = v;
+        }
+        if (xmin >= 0) span += xmax - xmin + 1;
+      }
     }
-    return { w, h, n, y0, y1, col: smooth(col), row: smooth(brow) };
+    // Letters = many short strokes packed close together. Objects in the picture = a few long edges.
+    const textiness = trans / Math.max(1, span);
+    if (textiness < 0.09) n = 0;
+    return { w, h, n, y0, y1, tx: textiness, col: smooth(col), row: smooth(brow) };
   }
   function smooth(v) {
     const o = new Float32Array(v.length);
@@ -1125,18 +1171,35 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return Math.max(lines, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
   }
   let prevM = null, sentM = null, lastSendTime = 0, changeSince = 0, lastDone = 0;
+  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0;
   const cap = () => S.engine === 'free' ? 1 : 3;
-  const dbg = { n: 0, stab: 0, chg: 0, why: '' };
+  const dbg = { n: 0, stab: 0, chg: 0, why: '', ms: 0 };
+  // Speed governor: never send more looks per minute than the AI account allows, so it never blocks us.
+  // New subtitles get priority; "maybe" and safety looks only use spare capacity.
+  const bucket = { tokens: 4, last: Date.now() };
+  const rpm = () => S.engine === 'free' ? 600 : (S.engine === 'gemini' && S.gfree ? 9 : S.rpm);
   function fire(m, why) {
     const now = Date.now();
+    bucket.tokens = Math.min(5, bucket.tokens + (now - bucket.last) / 60000 * rpm()); bucket.last = now;
+    const priority = why === 'new subtitle';
     if (inFlight >= cap() || now < pauseUntil || now - lastSendTime < 350) return false;
-    sentM = m; lastSendTime = now; changeSince = 0; dbg.why = why; tick(); return true;
+    if (now < quietUntil && (!priority || emptyStreak >= 3)) return false;
+    if (bucket.tokens < (priority ? 1 : 2.5)) return false;
+    bucket.tokens -= 1;
+    sentM = m; lastSendTime = now; changeSince = 0; dbg.why = why; tick();
+    if (priority || why.startsWith('new')) onNewSubtitle();
+    return true;
   }
   async function watch() {
     for (;;) {
-      await new Promise(r => setTimeout(r, 120));
+      await new Promise(r => setTimeout(r, inFlight >= cap() ? 200 : 120));
       if (!live || document.hidden) continue;
       const now = Date.now();
+      if (tvControlled() && !TV.playing) continue;                 // TV paused by the app: nothing new will appear, and the pause screen must not count
+      if (now < ignoreUntil) {                                     // TV just resumed or skipped: let Netflix's overlay fade, then take the picture as the new baseline
+        let m0; try { m0 = detectMask(); } catch (e) {}
+        if (m0) { prevM = m0; sentM = m0; } changeSince = 0; continue;
+      }
       if (!S.smartSkip) { if (now - lastSendTime >= S.iv * backoff) fire(null, 'timer'); continue; }
       const tm = performance.now();
       let m; try { m = detectMask(); } catch (e) { m = null; }
@@ -1144,7 +1207,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       if (!m) continue;
       const stab = prevM ? diffRatio(prevM, m) : 1, chg = sentM ? diffRatio(sentM, m) : 1;
       prevM = m; dbg.n = m.n; dbg.stab = stab; dbg.chg = chg;
-      if (S.diag) $('diag').textContent = `text px ${m.n}  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
+      if (S.diag) $('diag').textContent = `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
       const hasText = m.n >= MIN_TEXT;
       if (!hasText) {
         changeSince = 0;
@@ -1159,12 +1222,16 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       if (gap > (hasText ? 3000 : 6000) * (pauseUntil > now ? 2 : 1)) fire(m, 'safety');
     }
   }
+  // Answers with no new subtitle: the watcher was fooled by the picture. Be more careful for a while.
+  function quietDown() { emptyStreak++; quietUntil = Date.now() + Math.min(emptyStreak >= 3 ? 2500 : 8000, 1500 * emptyStreak); }
   const setStatus = t => { $('status').textContent = t; };
   async function tick() {
     if (!live || document.hidden || inFlight >= cap() || Date.now() < pauseUntil) return;
-    const b64 = grab(); if (!b64) return;
-    const my = ++seq; inFlight++; $('dot').classList.add('busy');
+    inFlight++; $('dot').classList.add('busy');
     const t0 = Date.now();
+    let b64 = null; try { b64 = await grabAsync(); } catch (e) {}
+    if (!b64) { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); return; }
+    const my = ++seq;
     try {
       const res = await ask(b64);
       avgLatency = avgLatency * 0.8 + (Date.now() - t0) * 0.2; lastDone = Date.now();
@@ -1180,13 +1247,19 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
           shown.push({ seq: my, text: daText }); if (shown.length > 50) shown.shift();
           if (my > shownSeq) { shownSeq = my; lastDaText = daText; }
           addLines(res.lines, my, t0);
-        }
-      } else if (Date.now() - lastHit > 4000) setStatus('Looking… keep the TV inside the camera window');
+          emptyStreak = 0; quietUntil = 0;
+        } else quietDown();
+      } else {
+        quietDown();
+        if (Date.now() - lastHit > 4000) setStatus('Looking… keep the TV inside the camera window');
+      }
     } catch (e) {
       if (e.status === 401 || e.status === 403) { setStatus('API key rejected. Check the key in Settings.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
       else if (e.status === 429) {
-        backoff = Math.min(backoff * 1.5, 5);
-        pauseUntil = Date.now() + 1000 * (e.retryAfter || 4);
+        // learn the account's real limit so it doesn't happen again
+        if (S.engine === 'claude') { S.rpm = Math.max(10, Math.round(S.rpm * 0.75)); store.set('rpm', S.rpm); }
+        bucket.tokens = 0;
+        pauseUntil = Date.now() + Math.min(5000, 1000 * (e.retryAfter || 3));
         setStatus(S.engine === 'gemini' && S.gfree ? 'Gemini free-tier limit hit. Set How often to look to 5 s or slower.' : 'Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
       }
       else if (e.status === 529 || e.status >= 500) { backoff = Math.min(backoff * 1.5, 5); pauseUntil = Date.now() + 3000; setStatus('Claude is overloaded right now, retrying…'); }
@@ -1299,7 +1372,8 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function setPlaying(p) {
     if (TV.playing === p) return;
     TV.playing = p;
-    if (!p) TV.pauseStart = Date.now(); else { TV.pauses.push([TV.pauseStart, Date.now()]); if (TV.pauses.length > 200) TV.pauses.shift(); }
+    if (!p) TV.pauseStart = Date.now(); else { TV.pauses.push([TV.pauseStart, Date.now()]); if (TV.pauses.length > 200) TV.pauses.shift(); ignoreUntil = Date.now() + 1500; }
+    if (p) endStudy();
     $('tvPP').textContent = p ? '⏸' : '▶';
   }
   function pausedSince(t0) {
@@ -1309,8 +1383,8 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return ms;
   }
   $('tvPP').onclick = async () => { const goPause = TV.playing; if (await tvPress(goPause ? 'PAUSE' : 'PLAY')) setPlaying(!goPause); };
-  $('tvRew').onclick = async () => { if (await tvPress('LEFT')) tvToast('⏪ 10 s'); };
-  $('tvFf').onclick = async () => { if (await tvPress('RIGHT')) tvToast('10 s ⏩'); };
+  $('tvRew').onclick = async () => { if (await tvPress('LEFT')) { tvToast('⏪ 10 s'); ignoreUntil = Date.now() + 2500; } };
+  $('tvFf').onclick = async () => { if (await tvPress('RIGHT')) { tvToast('10 s ⏩'); ignoreUntil = Date.now() + 2500; } };
   $('tvConnect').onclick = () => { TV.ok = false; tvConnect(); };
   $('tvTest').onclick = async () => { if (await tvPress('PAUSE')) { setPlaying(false); tvStatus('Sent pause. Did the TV pause? Press ⏯ in the Danish box to resume.', true); } };
   $('tvForget').onclick = () => { TV.token = ''; TV.lgKey = ''; store.del('tvToken'); store.del('tvLgKey'); tvDisconnect(); tvStatus('Pairing forgotten.'); };
@@ -1321,7 +1395,9 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     const steps = Math.max(1, Math.min(60, Math.ceil(back / 10000)));
     if (!TV.playing) { if (!(await tvPress('PLAY'))) return; setPlaying(true); await sleep(600); }
     tvToast(`⏪ ${steps * 10} s`);
+    ignoreUntil = Date.now() + 2000 + steps * 300;
     await tvPress('LEFT', steps);
+    ignoreUntil = Date.now() + 2500;                            // Netflix shows its seek bar for a moment
   }
   let jumpChip = null, jumpTimer = 0;
   function showJump(el) {
@@ -1346,6 +1422,8 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     $('qHear').classList.toggle('on', S.hear);
     $('qCult').classList.toggle('on', S.cult !== 'off');
     $('qCult').textContent = { off: '🇩🇰 Off', notes: '🇩🇰 Notes', pause: '🇩🇰 Auto-pause' }[S.cult];
+    $('qStudy').classList.toggle('on', S.study !== 'off');
+    $('qStudy').textContent = { off: '📖 Off', each: '📖 Every line', long: '📖 Long lines' }[S.study];
   }
   function quickToast(text) {
     const r = $('quick').getBoundingClientRect(), t = document.createElement('div');
@@ -1523,6 +1601,57 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   }
   quickUI();
   if (S.hear) document.addEventListener('click', function once() { document.removeEventListener('click', once); startHearing(); });
+
+  // ---------- 📖 study pause ----------
+  function tvControlled() { return (TV.type === 'samsung' || TV.type === 'lg') && !!TV.ip; }
+  $('studyMode').value = S.study; $('studyResume').value = S.studyResume; $('studySpeed').value = S.studySpeed;
+  $('studySpeedv').textContent = S.studySpeed.toFixed(1) + ' s';
+  $('studyMode').onchange = e => { S.study = e.target.value; store.set('study', S.study); quickUI(); };
+  $('studyResume').onchange = e => { S.studyResume = e.target.value; store.set('studyResume', S.studyResume); };
+  $('studySpeed').oninput = e => { S.studySpeed = +e.target.value; store.set('studySpeed', S.studySpeed); $('studySpeedv').textContent = S.studySpeed.toFixed(1) + ' s'; };
+  $('qStudy').onclick = () => {
+    S.study = { off: 'each', each: 'long', long: 'off' }[S.study]; store.set('study', S.study); $('studyMode').value = S.study; quickUI();
+    if (S.study !== 'off' && !tvControlled()) quickToast('Connect your TV in ⚙ → TV remote first');
+    else quickToast({ off: 'Study pause off', each: 'Pause after every line', long: 'Pause after long lines' }[S.study]);
+  };
+  let studyLine = null, studyTimer = 0, studyAnim = 0;
+  // Called the moment the watcher sees a NEW subtitle: the previous line has just finished being spoken.
+  async function onNewSubtitle() {
+    if (S.study === 'off' || !tvControlled() || !TV.playing || studyLine) return;
+    const prev = conv[conv.length - 1];
+    if (!prev || Date.now() - prev.t > 15000 || prev.studied) return;
+    const words = prev.da.length;
+    if (words <= 2 || (S.study === 'long' && words < 7)) return;
+    prev.studied = true;
+    if (!(await tvPress('PAUSE'))) return;
+    setPlaying(false);
+    studyLine = prev;
+    document.querySelectorAll(`.line[data-lid="${prev.id}"]`).forEach(d => d.classList.add('study'));
+    $('study').style.top = ((gapTop + gapBottom) / 2 - 30) + 'px'; $('study').style.display = 'block';
+    const bar = $('studyBar'); bar.style.transition = 'none'; bar.style.width = '0';
+    if (S.studyResume === 'auto') {
+      const ms = (1.5 + S.studySpeed * (words + 4)) * 1000;     // this line plus the next one that is coming in
+      requestAnimationFrame(() => { bar.style.transition = `width ${ms}ms linear`; bar.style.width = '100%'; });
+      studyTimer = setTimeout(studyContinue, ms);
+    }
+  }
+  async function studyContinue() {
+    clearTimeout(studyTimer);
+    if (await tvPress('PLAY')) setPlaying(true); else endStudy();
+  }
+  function endStudy() {
+    clearTimeout(studyTimer);
+    if (studyLine) document.querySelectorAll(`.line[data-lid="${studyLine.id}"]`).forEach(d => d.classList.remove('study'));
+    studyLine = null; $('study').style.display = 'none';
+  }
+  $('studyGo').onclick = studyContinue;
+
+  // ---------- buttons fade away; any touch brings them back ----------
+  let idleTimer = 0;
+  function wake() { document.body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add('idle'), 4000); }
+  document.addEventListener('pointerdown', wake, true);
+  document.addEventListener('touchstart', wake, { capture: true, passive: true });
+  wake();
 
   // ---------- start ----------
   const KEYHELP = {
