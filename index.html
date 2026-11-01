@@ -69,6 +69,7 @@
   #quick { position: fixed; left: 0; right: 0; z-index: 12; display: flex; gap: 6px; justify-content: center; pointer-events: none; }
   #quick button { pointer-events: auto; background: rgba(20,20,20,0.75); backdrop-filter: blur(4px); }
   #quick button.on { background: #ffd400; color: #000; }
+  #diag { position: fixed; left: 8px; z-index: 13; font: 11px ui-monospace, monospace; color: #9f9; background: rgba(0,0,0,.6); padding: 3px 6px; border-radius: 6px; display: none; pointer-events: none; white-space: pre; }
   #card { position: fixed; left: 12px; right: 12px; z-index: 57; background: #161616; border: 1px solid #ffd400; border-radius: 16px;
     padding: 14px 16px; display: none; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,.6); -webkit-user-select: text; user-select: text; }
   #card .ct { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
@@ -163,6 +164,7 @@
   <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button>
 </div>
 <div id="card"></div>
+<div id="diag"></div>
 
 <!-- Word bank -->
 <div class="overlay" id="bank">
@@ -274,6 +276,7 @@
     <div class="row" style="margin-top:8px"><button class="big" id="tvForget">Forget TV pairing</button></div>
   </div>
   <div class="note" id="tvOther">These can't be controlled from a web page (they need a native app or a home hub). Samsung and LG TVs can.</div>
+  <label class="row" style="color:#ccc"><input type="checkbox" id="showdiag"> Show diagnostics (for troubleshooting)</label>
   <label>Conversation</label>
   <div class="row"><button class="big" id="clearconv">Clear conversation</button></div>
   <label>Word bank backup</label>
@@ -319,7 +322,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   const saveBank = () => store.set('bank', bank);
@@ -351,6 +354,7 @@
     document.body.classList.toggle('gapTop', S.mode === 'gapTop');
     document.body.classList.toggle('gapBottom', S.mode === 'gapBottom');
     $('zoomtip').style.top = ((gapTop + gapBottom) / 2) + 'px';
+    $('diag').style.top = (gapTop + 6) + 'px';
     $('quick').style.top = (gapBottom - gapTop > 110 ? gapBottom - 50 : gapTop + 6) + 'px';
   }
 
@@ -417,6 +421,8 @@
   const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free'); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
+  $('showdiag').checked = S.diag; $('diag').style.display = S.diag ? 'block' : 'none';
+  $('showdiag').onchange = e => { S.diag = e.target.checked; store.set('diag', S.diag); $('diag').style.display = S.diag ? 'block' : 'none'; };
   $('smartskip').checked = S.smartSkip;
   $('smartskip').onchange = e => { S.smartSkip = e.target.checked; store.set('smartSkip', S.smartSkip); };
   $('model').value = S.model;
@@ -446,7 +452,7 @@
   $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
   $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
   $('forget').onclick = () => { store.del('key'); store.del('gkey'); try { localStorage.removeItem('ut2_key'); } catch (e) {} location.reload(); };
-  $('clearconv').onclick = () => { conv.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = ''; $('settings').style.display = 'none'; };
+  $('clearconv').onclick = () => { conv.length = 0; shown.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = ''; $('settings').style.display = 'none'; };
   $('exportbank').onclick = async () => {
     const txt = Object.values(bank).map(b => `${b.da}\t${b.en}\t${b.ctxDa || ''}`).join('\n');
     try { await navigator.clipboard.writeText(txt); $('exportbank').textContent = 'Copied!'; }
@@ -495,17 +501,27 @@
   function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
   function stickBottom(el, force) { if (force || nearBottom(el)) el.scrollTop = el.scrollHeight; }
 
-  function addLines(lines) {
+  function addLines(lines, seqNo, takenAt) {
     const stickEn = nearBottom(sEn), stickDa = nearBottom(sDa);
     sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
-    sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
-    sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    const sq = seqNo || 1e12;
+    const late = conv.length && conv[conv.length - 1].seq > sq;            // an older picture's answer arrived after a newer one
+    if (!late) { sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur')); sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur')); }
     const added = [];
     for (const l of lines) {
-      const line = { id: ++lineId, spk: l.spk, da: l.da, en: l.en, t: Date.now() };
-      conv.push(line);
-      sEn.appendChild(renderLine(line, 'en'));
-      sDa.appendChild(renderLine(line, 'da'));
+      const line = { id: ++lineId, spk: l.spk, da: l.da, en: l.en, t: takenAt || Date.now(), seq: sq };
+      const enEl = renderLine(line, 'en'), daEl = renderLine(line, 'da');
+      if (late) {
+        let i = conv.findIndex(c => c.seq > sq);
+        const before = conv[i];
+        conv.splice(i, 0, line);
+        enEl.classList.remove('cur'); daEl.classList.remove('cur');
+        sEn.insertBefore(enEl, sEn.querySelector(`.line[data-lid="${before.id}"]`));
+        sDa.insertBefore(daEl, sDa.querySelector(`.line[data-lid="${before.id}"]`));
+      } else {
+        conv.push(line);
+        sEn.appendChild(enEl); sDa.appendChild(daEl);
+      }
       countSeen(line);
       added.push(line);
     }
@@ -803,6 +819,13 @@
     return cv.toDataURL('image/jpeg', 0.8).split(',')[1];
   }
 
+  // ---------- network with timeout ----------
+  async function fetchT(url, opts, ms) {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), ms || 6000);
+    try { return await fetch(url, Object.assign({}, opts, { signal: ac.signal })); }
+    catch (e) { if (e.name === 'AbortError') { const er = new Error('timeout'); er.timeout = true; throw er; } throw e; }
+    finally { clearTimeout(t); }
+  }
   // ---------- AI ----------
   const SYSTEM = `You are a live subtitle translator and dialogue tracker. Each image is a phone-camera photo of a TV showing Danish programming with Danish subtitles.
 
@@ -819,7 +842,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
   async function askClaude(b64) {
     const ctx = contextText();
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetchT('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true' },
@@ -878,7 +901,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   // ---------- Google Gemini ----------
   async function askGemini(b64) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${S.gmodel}:generateContent?key=${encodeURIComponent(S.gkey)}`;
-    const r = await fetch(url, {
+    const r = await fetchT(url, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM }] },
@@ -900,12 +923,12 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   // ---------- Free: on-phone text reader + Google Translate ----------
   async function googleTranslateAuto(text) {
     const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=' + encodeURIComponent(text);
-    const r = await fetch(u); if (!r.ok) throw new Error('Google Translate ' + r.status);
+    const r = await fetchT(u, {}, 6000); if (!r.ok) throw new Error('Google Translate ' + r.status);
     const j = await r.json(); return { en: j[0].map(x => x[0]).join(''), src: j[2] || '' };
   }
   async function googleTranslate(text) {
     const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=da&tl=en&dt=t&q=' + encodeURIComponent(text);
-    const r = await fetch(u); if (!r.ok) throw new Error('Google Translate ' + r.status);
+    const r = await fetchT(u, {}, 6000); if (!r.ok) throw new Error('Google Translate ' + r.status);
     const j = await r.json(); return j[0].map(x => x[0]).join('');
   }
   let ocr = null, ocrLoading = null;
@@ -1035,90 +1058,105 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   $('iv').addEventListener('input', updateCost);
   updateCost();
 
+  const shown = [];
   let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1, pauseUntil = 0, sessionStart = 0;
   // ---------- on-phone subtitle watcher (free, ~8 times a second) ----------
-  // Subtitle text = bright, colourless (or yellow) pixels with a dark outline right next to them.
-  // When that pattern changes and then holds still for a moment, a new subtitle has arrived: look right away.
-  const DW = 480, MIN_TEXT = 40;
+  // 1. Find subtitle-like pixels: bright and colourless (or yellow) with a dark outline right next to them.
+  // 2. Focus on the lowest band of rows packed with such pixels: that is where subtitles sit.
+  //    Moving things elsewhere in the picture are ignored.
+  // 3. When that band's "shape" changes, look right away once it settles, or after 0.45 s if the picture is too busy to settle.
+  const DW = 360, MIN_TEXT = 30;
   const dc = document.createElement('canvas'), dx = dc.getContext('2d', { willReadFrequently: true });
-  function dilate(m, w, h, r) {
-    const t = new Uint8Array(w * h), o = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      if (!m[y * w + x]) continue;
-      for (let k = Math.max(0, x - r); k <= Math.min(w - 1, x + r); k++) t[y * w + k] = 1;
-    }
-    for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) {
-      if (!t[y * w + x]) continue;
-      for (let k = Math.max(0, y - r); k <= Math.min(h - 1, y + r); k++) o[k * w + x] = 1;
-    }
-    return o;
-  }
+  let bufW = 0, bufH = 0, lumB = null, briB = null;
   function detectMask() {
     const c = cropRect(); if (!c) return null;
     const w = DW, h = Math.max(8, Math.round(c.sh * DW / c.sw));
     dc.width = w; dc.height = h; dx.drawImage(video, c.x0, c.y0, c.sw, c.sh, 0, 0, w, h);
     const d = dx.getImageData(0, 0, w, h).data, N = w * h;
-    const bright = new Uint8Array(N), dark = new Uint8Array(N);
+    if (w !== bufW || h !== bufH) { bufW = w; bufH = h; lumB = new Uint8Array(N); briB = new Uint8Array(N); }
     for (let i = 0, p = 0; p < N; i += 4, p++) {
-      const R = d[i], G = d[i + 1], B = d[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
-      bright[p] = ((mx > 165 && mx - mn < 70) || (R > 170 && G > 150 && B < 120)) ? 1 : 0;
-      dark[p] = (R * 77 + G * 150 + B * 29) >> 8 < 100 ? 1 : 0;
+      const R = d[i], G = d[i + 1], B = d[i + 2], mx = R > G ? (R > B ? R : B) : (G > B ? G : B), mn = R < G ? (R < B ? R : B) : (G < B ? G : B);
+      lumB[p] = (R * 77 + G * 150 + B * 29) >> 8;
+      briB[p] = ((mx > 165 && mx - mn < 70) || (R > 170 && G > 150 && B < 120)) ? 1 : 0;
     }
-    const nearDark = dilate(dark, w, h, 2), mask = new Uint8Array(N);
-    const col = new Float32Array(w), row = new Float32Array(h);
-    let n = 0;
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const p = y * w + x;
-      if (bright[p] && nearDark[p]) { mask[p] = 1; n++; col[x]++; row[y]++; }
+    // text pixel = bright with a dark pixel 2 px left/right/up/down (the subtitle outline)
+    const row = new Float32Array(h);
+    const isText = p => {
+      if (!briB[p]) return 0;
+      const x = p % w;
+      return ((x > 1 && lumB[p - 2] < 100) || (x < w - 2 && lumB[p + 2] < 100) || (p >= 2 * w && lumB[p - 2 * w] < 100) || (p < N - 2 * w && lumB[p + 2 * w] < 100)) ? 1 : 0;
+    };
+    const mask = new Uint8Array(N);
+    for (let p = 0; p < N; p++) if (isText(p)) { mask[p] = 1; row[(p / w) | 0]++; }
+    // lowest band of text rows (subtitles); text rows have many text pixels spread across the row
+    const thr = Math.max(4, w * 0.02);
+    let y1 = -1, y0 = -1;
+    for (let y = h - 1; y >= 0; y--) {
+      if (row[y] >= thr) { if (y1 < 0) y1 = y; y0 = y; }
+      else if (y1 >= 0 && y0 - y > Math.max(4, h * 0.05)) break;     // gap ends the band (allows the space between two subtitle lines)
     }
-    return { mask, w, h, n, col: smooth(col), row: smooth(row) };
+    let n = 0; const col = new Float32Array(w), brow = new Float32Array(Math.max(1, y1 - y0 + 1));
+    if (y1 >= 0 && y1 - y0 >= 2) {
+      for (let y = y0; y <= y1; y++) for (let x = 0; x < w; x++) if (mask[y * w + x]) { col[x]++; brow[y - y0]++; n++; }
+    }
+    return { w, h, n, y0, y1, col: smooth(col), row: smooth(brow) };
   }
   function smooth(v) {
     const o = new Float32Array(v.length);
     for (let i = 0; i < v.length; i++) o[i] = (v[i - 1] || 0) * 0.25 + v[i] * 0.5 + (v[i + 1] || 0) * 0.25;
     return o;
   }
-  // Compare text "shape" profiles (columns and rows), allowing a few pixels of camera shake.
   function profDiff(a, b, maxShift) {
     let sa = 0, sb = 0; for (const x of a) sa += x; for (const x of b) sb += x;
     if (sa + sb === 0) return 0;
     let best = Infinity;
     for (let sft = -maxShift; sft <= maxShift; sft++) {
-      let d = 0;
-      for (let i = 0; i < a.length; i++) { const j = i + sft; d += Math.abs(a[i] - (j >= 0 && j < b.length ? b[j] : 0)); }
-      if (d < best) best = d;
+      let dd = 0;
+      for (let i = 0; i < a.length; i++) { const j = i + sft; dd += Math.abs(a[i] - (j >= 0 && j < b.length ? b[j] : 0)); }
+      if (dd < best) best = dd;
     }
     return best / Math.max(30, sa + sb);
   }
   function diffRatio(a, b) {
-    if (!a || !b || a.w !== b.w || a.h !== b.h) return 1;
-    return Math.max(profDiff(a.col, b.col, 8), profDiff(a.row, b.row, 6));
+    if (!a || !b || a.w !== b.w) return 1;
+    if (a.n < MIN_TEXT && b.n < MIN_TEXT) return 0;
+    if ((a.n < MIN_TEXT) !== (b.n < MIN_TEXT)) return 1;
+    const lines = Math.abs((a.y1 - a.y0) - (b.y1 - b.y0)) > Math.max(6, a.h * 0.04) ? 0.5 : 0;   // one line vs two lines
+    return Math.max(lines, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
   }
-  let prevM = null, sentM = null, lastSendTime = 0;
+  let prevM = null, sentM = null, lastSendTime = 0, changeSince = 0, lastDone = 0;
   const cap = () => S.engine === 'free' ? 1 : 3;
-  function fire(m) {
+  const dbg = { n: 0, stab: 0, chg: 0, why: '' };
+  function fire(m, why) {
     const now = Date.now();
-    if (inFlight >= cap() || now < pauseUntil || now - lastSendTime < 350) return;
-    sentM = m; lastSendTime = now; tick();
+    if (inFlight >= cap() || now < pauseUntil || now - lastSendTime < 350) return false;
+    sentM = m; lastSendTime = now; changeSince = 0; dbg.why = why; tick(); return true;
   }
   async function watch() {
     for (;;) {
       await new Promise(r => setTimeout(r, 120));
       if (!live || document.hidden) continue;
       const now = Date.now();
-      if (!S.smartSkip) { if (now - lastSendTime >= S.iv * backoff) fire(null); continue; }
+      if (!S.smartSkip) { if (now - lastSendTime >= S.iv * backoff) fire(null, 'timer'); continue; }
+      const tm = performance.now();
       let m; try { m = detectMask(); } catch (e) { m = null; }
+      dbg.ms = dbg.ms ? dbg.ms * 0.9 + (performance.now() - tm) * 0.1 : performance.now() - tm;
       if (!m) continue;
-      const stable = prevM && diffRatio(prevM, m) < 0.22;
-      prevM = m;
+      const stab = prevM ? diffRatio(prevM, m) : 1, chg = sentM ? diffRatio(sentM, m) : 1;
+      prevM = m; dbg.n = m.n; dbg.stab = stab; dbg.chg = chg;
+      if (S.diag) $('diag').textContent = `text px ${m.n}  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
       const hasText = m.n >= MIN_TEXT;
-      if (!hasText) {                               // subtitle gone: reset, so even a repeat of the same line counts as new
-        if (stable && sentM && sentM.n >= MIN_TEXT) sentM = m;
-      } else if (stable && (!sentM || diffRatio(sentM, m) > 0.3)) {
-        fire(m);                                    // new subtitle, settled: look now
-        continue;
-      }
-      if (now - lastSendTime > 5000 * backoff) fire(m);   // safety look in case the watcher misses a subtitle style
+      if (!hasText) {
+        changeSince = 0;
+        if (stab < 0.2 && sentM && sentM.n >= MIN_TEXT) sentM = m;      // subtitle gone: the next one counts as new even if it repeats
+      } else if (chg > 0.3) {
+        if (!changeSince) changeSince = now;
+        if (stab < 0.22) { if (fire(m, 'new subtitle')) continue; }                 // settled: look now
+        else if (now - changeSince > 450) { if (fire(m, 'new subtitle (busy picture)')) continue; }
+      } else changeSince = 0;
+      // safety look: never go more than 3 s (with text) or 6 s (without) between looks
+      const gap = now - lastSendTime;
+      if (gap > (hasText ? 3000 : 6000) * (pauseUntil > now ? 2 : 1)) fire(m, 'safety');
     }
   }
   const setStatus = t => { $('status').textContent = t; };
@@ -1129,15 +1167,20 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     const t0 = Date.now();
     try {
       const res = await ask(b64);
-      avgLatency = avgLatency * 0.8 + (Date.now() - t0) * 0.2;
+      avgLatency = avgLatency * 0.8 + (Date.now() - t0) * 0.2; lastDone = Date.now();
       addCost(res.cost || 0);
       backoff = Math.max(1, backoff * 0.9);
-      if (my < shownSeq) return;
       if (res.lines.length) {
-        shownSeq = my; lastHit = Date.now(); if (Date.now() > pauseUntil) setStatus('');
+        lastHit = Date.now(); if (Date.now() > pauseUntil) setStatus('');
         if (res.roster) roster = Object.assign(roster, res.roster);
         const daText = res.lines.map(l => l.da.map(t => t[0]).join(' ')).join(' ');
-        if (!similar(daText, lastDaText)) { lastDaText = daText; addLines(res.lines); }
+        // skip if this subtitle is already on screen (compare with the last few, since answers can arrive out of order)
+        const recent = shown.slice(-4);
+        if (!recent.some(r => similar(daText, r.text))) {
+          shown.push({ seq: my, text: daText }); if (shown.length > 50) shown.shift();
+          if (my > shownSeq) { shownSeq = my; lastDaText = daText; }
+          addLines(res.lines, my, t0);
+        }
       } else if (Date.now() - lastHit > 4000) setStatus('Looking… keep the TV inside the camera window');
     } catch (e) {
       if (e.status === 401 || e.status === 403) { setStatus('API key rejected. Check the key in Settings.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
@@ -1147,6 +1190,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
         setStatus(S.engine === 'gemini' && S.gfree ? 'Gemini free-tier limit hit. Set How often to look to 5 s or slower.' : 'Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
       }
       else if (e.status === 529 || e.status >= 500) { backoff = Math.min(backoff * 1.5, 5); pauseUntil = Date.now() + 3000; setStatus('Claude is overloaded right now, retrying…'); }
+      else if (e.timeout) { setStatus('Slow connection, retrying…'); }
       else if (/credit|billing/i.test(e.message)) setStatus('No API credit. Add credit at console.anthropic.com → Billing.');
       else setStatus('Problem: ' + (e.message || e));
     } finally { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); }
@@ -1154,7 +1198,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
 
   // test hook: lets a page preview run without a camera or API key
-  window.__ut = { addLines, bank: () => bank };
+  window.__ut = { addLines, bank: () => bank, dbg };
 
   // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
   // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
@@ -1298,7 +1342,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function quickUI() {
     $('qSpk').classList.toggle('on', S.showSpk);
     const i = SIZES.findIndex(z => z[1] === S.fsEn);
-    $('qText').textContent = 'Aa ' + (i >= 0 ? SIZES[i][0] : '');
+    $('qText').textContent = 'Text ' + (i >= 0 ? SIZES[i][0] : '');
     $('qHear').classList.toggle('on', S.hear);
     $('qCult').classList.toggle('on', S.cult !== 'off');
     $('qCult').textContent = { off: '🇩🇰 Off', notes: '🇩🇰 Notes', pause: '🇩🇰 Auto-pause' }[S.cult];
