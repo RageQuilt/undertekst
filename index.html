@@ -18,8 +18,20 @@
   /* ---------- panels ---------- */
   .panel { position: fixed; left: 0; right: 0; z-index: 10; display: flex; flex-direction: column;
     background: rgba(0,0,0,0.86); }
-  #pEn { top: 0; padding-top: env(safe-area-inset-top); border-bottom: 1px solid #333; }
-  #pDa { bottom: 0; padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid #333; }
+  #video { touch-action: none; transform-origin: 50% 50%; }
+  #pEn { border-bottom: 1px solid #333; }
+  #pDa { border-top: 1px solid #333; }
+  #pEn.attop { padding-top: env(safe-area-inset-top); }
+  #pDa.atbottom { padding-bottom: env(safe-area-inset-bottom); }
+  body.docked #pEn { border-bottom: 2px solid #ffd400; }
+  #gEnT, #gDaB { display: none; }
+  body.gapTop #gEnT, body.gapBottom #gDaB { display: flex; }
+  body.docked #gDa { display: none; }
+  body.docked #gEn::before { background: #ffd400; }
+  #zoomtip { position: fixed; z-index: 15; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.6);
+    color: #fff; font-weight: 700; font-size: 18px; padding: 6px 14px; border-radius: 16px; pointer-events: none;
+    opacity: 0; transition: opacity .3s; }
+  #zoomtip.show { opacity: 1; }
   .scroll { flex: 1; overflow-y: auto; padding: 4px 14px 6px; -webkit-overflow-scrolling: touch; }
   #sEn { font-size: var(--fsEn, 26px); font-weight: 600; }
   #sDa { font-size: var(--fsDa, 20px); }
@@ -103,6 +115,7 @@
 
 <!-- English: top -->
 <div class="panel" id="pEn">
+  <div class="grip" id="gEnT"></div>
   <div class="head">
     <span id="dot"></span><span class="tag">EN</span><span id="status"></span>
     <button class="ib on" id="live">Live</button>
@@ -118,7 +131,9 @@
   <div class="grip" id="gDa"></div>
   <div class="head" style="padding-top:0"><span class="tag">DA</span></div>
   <div class="scroll" id="sDa"><div class="empty">Tap a word to see its match. Double-tap to save it.</div></div>
+  <div class="grip" id="gDaB"></div>
 </div>
+<div id="zoomtip"></div>
 
 <!-- Word bank -->
 <div class="overlay" id="bank">
@@ -200,34 +215,81 @@
   const saveBank = () => store.set('bank', bank);
 
   // ---------- layout: draggable panels ----------
+  // Modes: 'split'     = English top, camera middle, Danish bottom
+  //        'gapBottom' = Danish docked under English, camera at the bottom
+  //        'gapTop'    = English docked on top of Danish, camera at the top
+  S.mode = store.get('mode', 'split');
+  const MINE = 0.14, MIND = 0.12, MINGAP = 0.06, SNAP = 0;
+  let gapTop = 0, gapBottom = 0;   // camera window, in px, for the zoom label
   function layout() {
     const H = window.innerHeight;
-    S.hEn = Math.min(Math.max(S.hEn, 0.14), 0.86);
-    S.hDa = Math.min(Math.max(S.hDa, 0.12), 0.86);
-    const maxSum = 0.94;
-    if (S.hEn + S.hDa > maxSum) {
-      if (dragging === 'en') S.hDa = Math.max(0.12, maxSum - S.hEn); else S.hEn = Math.max(0.14, maxSum - S.hDa);
-      if (S.hEn + S.hDa > maxSum) { if (dragging === 'en') S.hEn = maxSum - S.hDa; else S.hDa = maxSum - S.hEn; }
+    S.hEn = Math.min(Math.max(S.hEn, MINE), 1 - MIND - MINGAP);
+    S.hDa = Math.min(Math.max(S.hDa, MIND), 1 - MINE - MINGAP);
+    if (S.hEn + S.hDa > 1 - MINGAP) {
+      if (S.mode === 'split') { S.hDa = 1 - MINGAP - S.hEn; } else { S.hDa = Math.max(MIND, 1 - MINGAP - S.hEn); S.hEn = 1 - MINGAP - S.hDa; }
     }
-    pEn.style.height = (S.hEn * H) + 'px';
-    pDa.style.height = (S.hDa * H) + 'px';
+    const he = S.hEn * H, hd = S.hDa * H;
+    let eTop, dTop;
+    if (S.mode === 'gapBottom') { eTop = 0; dTop = he; gapTop = he + hd; gapBottom = H; }
+    else if (S.mode === 'gapTop') { dTop = H - hd; eTop = dTop - he; gapTop = 0; gapBottom = eTop; }
+    else { eTop = 0; dTop = H - hd; gapTop = he; gapBottom = dTop; }
+    pEn.style.top = eTop + 'px'; pEn.style.height = he + 'px'; pEn.style.bottom = 'auto';
+    pDa.style.top = dTop + 'px'; pDa.style.height = hd + 'px'; pDa.style.bottom = 'auto';
+    pEn.classList.toggle('attop', eTop === 0);
+    pDa.classList.toggle('atbottom', dTop + hd >= H - 1);
+    document.body.classList.toggle('docked', S.mode !== 'split');
+    document.body.classList.toggle('gapTop', S.mode === 'gapTop');
+    document.body.classList.toggle('gapBottom', S.mode === 'gapBottom');
+    $('zoomtip').style.top = ((gapTop + gapBottom) / 2) + 'px';
   }
-  let dragging = null;
-  function makeDrag(grip, which) {
-    let y0 = 0, h0 = 0;
+
+  // One handler per grip. Each returns the new state from the drag distance (fraction of screen).
+  function makeDrag(grip, onMove) {
+    let y0 = 0, start = null, active = false;
     grip.addEventListener('pointerdown', e => {
-      dragging = which; y0 = e.clientY; h0 = which === 'en' ? S.hEn : S.hDa; grip.setPointerCapture(e.pointerId);
+      active = true; y0 = e.clientY; start = { hEn: S.hEn, hDa: S.hDa, mode: S.mode };
+      grip.setPointerCapture(e.pointerId);
     });
     grip.addEventListener('pointermove', e => {
-      if (dragging !== which) return;
-      const dy = (e.clientY - y0) / window.innerHeight;
-      if (which === 'en') S.hEn = h0 + dy; else S.hDa = h0 - dy;
+      if (!active) return;
+      const res = onMove((e.clientY - y0) / window.innerHeight, start);
       layout(); stickBottom(sEn, true); stickBottom(sDa, true);
+      if (res === 'snapped') { active = false; try { navigator.vibrate && navigator.vibrate(15); } catch (er) {} }
     });
-    const end = () => { if (dragging === which) { store.set('hEn', S.hEn); store.set('hDa', S.hDa); } dragging = null; };
+    const end = () => { active = false; store.set('hEn', S.hEn); store.set('hDa', S.hDa); store.set('mode', S.mode); };
     grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
   }
-  makeDrag($('gEn'), 'en'); makeDrag($('gDa'), 'da');
+
+  // English bottom edge: in split mode it grows English; pushed into Danish it docks (camera goes to the top).
+  // When docked it is the joint between the two boxes and moves the split between them.
+  makeDrag($('gEn'), (dy, s) => {
+    if (s.mode === 'split') {
+      const want = s.hEn + dy, room = 1 - s.hDa;
+      if (want > room + SNAP) { S.mode = 'gapTop'; S.hEn = s.hEn; return 'snapped'; }
+      S.hEn = Math.min(want, room - MINGAP);
+    } else {
+      const sum = s.hEn + s.hDa;
+      S.hEn = Math.min(Math.max(s.hEn + dy, MINE), sum - MIND); S.hDa = sum - S.hEn;
+    }
+  });
+  // Danish top edge (split mode only): grows Danish; pushed into English it docks (camera goes to the bottom).
+  makeDrag($('gDa'), (dy, s) => {
+    const want = s.hDa - dy, room = 1 - s.hEn;
+    if (want > room + SNAP) { S.mode = 'gapBottom'; S.hDa = s.hDa; return 'snapped'; }
+    S.hDa = Math.min(want, room - MINGAP);
+  });
+  // Danish bottom edge (camera at bottom): grows Danish downwards; pulled to the screen bottom it unlocks.
+  makeDrag($('gDaB'), (dy, s) => {
+    const want = s.hDa + dy;
+    if (s.hEn + want > 1 - 0.01) { S.mode = 'split'; S.hDa = s.hDa; return 'snapped'; }
+    S.hDa = Math.min(want, 1 - MINGAP - s.hEn);
+  });
+  // English top edge (camera at top): grows English upwards; pulled to the screen top it unlocks.
+  makeDrag($('gEnT'), (dy, s) => {
+    const want = s.hEn - dy;
+    if (want + s.hDa > 1 - 0.01) { S.mode = 'split'; S.hEn = s.hEn; return 'snapped'; }
+    S.hEn = Math.min(want, 1 - MINGAP - s.hDa);
+  });
   window.addEventListener('resize', layout);
   layout();
 
@@ -498,26 +560,66 @@
       audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
     });
     video.srcObject = stream; await video.play();
-    const track = stream.getVideoTracks()[0];
+    camTrack = stream.getVideoTracks()[0];
     try {
-      const caps = track.getCapabilities ? track.getCapabilities() : {};
-      if (caps.zoom) {
-        const z = $('zoom'); z.min = caps.zoom.min; z.max = caps.zoom.max; z.step = caps.zoom.step || 0.1;
-        z.value = track.getSettings().zoom || caps.zoom.min; $('zoomv').textContent = (+z.value).toFixed(1) + '×';
-        $('zoomwrap').style.display = 'block';
-        z.oninput = () => { $('zoomv').textContent = (+z.value).toFixed(1) + '×';
-          track.applyConstraints({ advanced: [{ zoom: +z.value }] }).catch(() => {}); };
+      const caps = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
+      if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+        hwZoom = { min: caps.zoom.min, max: caps.zoom.max };
+        Z.min = caps.zoom.min; Z.max = caps.zoom.max; Z.cur = camTrack.getSettings().zoom || caps.zoom.min;
       }
     } catch (e) {}
+    const z = $('zoom'); z.min = Z.min; z.max = Z.max; z.step = 0.1; z.value = Z.cur;
+    $('zoomv').textContent = Z.cur.toFixed(1) + '×'; $('zoomwrap').style.display = 'block';
+    z.oninput = () => setZoom(+z.value, false);
+    setZoom(store.get('zoomLevel', Z.cur), false);
   }
+
+  // ---------- zoom: two-finger pinch on the camera view ----------
+  let camTrack = null, hwZoom = null;
+  const Z = { min: 1, max: 5, cur: 1 };          // digital zoom range when the phone has no camera zoom control
+  let zoomTipTimer = 0, zoomPending = false;
+  function setZoom(v, tip) {
+    Z.cur = Math.min(Math.max(v, Z.min), Z.max);
+    if (hwZoom) {
+      if (!zoomPending) {                       // throttle hardware calls while pinching
+        zoomPending = true;
+        requestAnimationFrame(() => {
+          zoomPending = false;
+          camTrack.applyConstraints({ advanced: [{ zoom: Z.cur }] }).catch(() => {});
+        });
+      }
+    } else {
+      video.style.transform = Z.cur > 1.001 ? `scale(${Z.cur})` : '';
+    }
+    $('zoom').value = Z.cur; $('zoomv').textContent = Z.cur.toFixed(1) + '×';
+    store.set('zoomLevel', Z.cur);
+    if (tip) {
+      const t = $('zoomtip'); t.textContent = Z.cur.toFixed(1) + '×'; t.classList.add('show');
+      clearTimeout(zoomTipTimer); zoomTipTimer = setTimeout(() => t.classList.remove('show'), 700);
+    }
+  }
+  let pinch = null;
+  const dist = ts => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  document.addEventListener('touchstart', e => {
+    if (e.touches.length === 2 && e.target === video) { pinch = { d0: dist(e.touches), z0: Z.cur }; e.preventDefault(); }
+  }, { passive: false });
+  document.addEventListener('touchmove', e => {
+    if (pinch && e.touches.length === 2) { e.preventDefault(); setZoom(pinch.z0 * dist(e.touches) / pinch.d0, true); }
+  }, { passive: false });
+  document.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+  // stop iOS's own page pinch-zoom on the camera area
+  document.addEventListener('gesturestart', e => { if (e.target === video) e.preventDefault(); });
   async function keepAwake() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {} }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
 
   const cv = document.createElement('canvas'), cx = cv.getContext('2d');
   function grab() {
     const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
-    const W = Math.min(1280, vw), H = Math.round(vh * W / vw);
-    cv.width = W; cv.height = H; cx.drawImage(video, 0, 0, W, H);
+    // with digital zoom, send only the zoomed-in middle of the frame
+    const dz = hwZoom ? 1 : Z.cur;
+    const sw = vw / dz, sh = vh / dz, sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+    const W = Math.min(1280, Math.round(sw)), H = Math.round(sh * W / sw);
+    cv.width = W; cv.height = H; cx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
     return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
   }
 
