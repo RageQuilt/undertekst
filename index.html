@@ -63,6 +63,8 @@
   .w.hl { background: #ffd400; color: #000; }
   .w.pulse { animation: pulse .8s ease-out; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,212,0,.75); } 100% { box-shadow: 0 0 0 9px rgba(255,212,0,0); } }
+  .bubble { position: fixed; z-index: 55; transform: translate(-50%, 0); background: #ffd400; color: #000; font-weight: 600;
+    font-size: 15px; padding: 5px 10px; border-radius: 10px; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); max-width: 80vw; }
   .empty { color: #777; font-size: 15px; font-weight: 400; padding-top: 4px; }
 
   .toast { position: fixed; z-index: 60; font-size: 12px; font-weight: 600; background: rgba(255,212,0,0.95); color: #000;
@@ -70,7 +72,7 @@
   @keyframes rise { 0% { opacity: 0; transform: translate(-50%, 0); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -26px); } }
 
   /* ---------- overlays ---------- */
-  .overlay { position: fixed; inset: 0; z-index: 40; background: #0b0b0b; overflow-y: auto; display: none;
+  .overlay { position: fixed; inset: 0; z-index: 62; background: #0b0b0b; overflow-y: auto; display: none;
     padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 30px); -webkit-user-select: text; user-select: text; }
   .ohead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .ohead h2 { flex: 1; margin: 0; font-size: 22px; }
@@ -174,11 +176,35 @@
   <label>Danish text size: <span id="fsDav"></span></label>
   <input type="range" id="fsDa" min="14" max="56">
   <label class="row" style="color:#ccc"><input type="checkbox" id="showspk"> Show who is speaking (M1, W1…)</label>
-  <label>AI model</label>
-  <select id="model">
-    <option value="claude-haiku-5-5">Fast (Claude Haiku), recommended</option>
-    <option value="claude-sonnet-5-5">More accurate, slower (Claude Sonnet) · about 20× the cost</option>
+  <label>Engine</label>
+  <select id="engine">
+    <option value="claude">Claude AI (best: speakers + word links)</option>
+    <option value="gemini">Google Gemini AI (free tier available)</option>
+    <option value="free">Free: phone reads text + Google Translate</option>
   </select>
+  <div id="engClaude">
+    <label>Claude model</label>
+    <select id="model">
+      <option value="claude-haiku-5-5">Fast (Claude Haiku), recommended</option>
+      <option value="claude-sonnet-5-5">More accurate, slower (Claude Sonnet) · about 20× the cost</option>
+    </select>
+    <label>Claude API key</label>
+    <input type="password" id="keyC" placeholder="sk-ant-..." style="width:100%" autocomplete="off">
+  </div>
+  <div id="engGemini">
+    <label>Gemini model</label>
+    <select id="gmodel">
+      <option value="gemini-2.5-flash">Gemini 2.5 Flash (better reading)</option>
+      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (fastest, cheapest)</option>
+    </select>
+    <label class="row" style="color:#ccc"><input type="checkbox" id="gfree"> My Gemini key is on the free tier</label>
+    <div class="note">Free tier costs nothing but only allows a few looks per minute, so set "How often to look" to 5 s or slower. Google may use free-tier data to improve its products.</div>
+    <label>Gemini API key</label>
+    <input type="password" id="keyG" placeholder="From aistudio.google.com/apikey" style="width:100%" autocomplete="off">
+  </div>
+  <div id="engFree">
+    <div class="note">No key, no cost. The phone reads the subtitles itself and Google Translate translates them. Less accurate than the AI engines and no speaker tags. Tap a Danish word to see its translation.</div>
+  </div>
   <label>How often to look: <span id="ivv"></span></label>
   <input type="range" id="iv" min="800" max="3000" step="100">
   <div class="note" id="estnote"></div>
@@ -203,7 +229,7 @@
   <label>Word bank backup</label>
   <div class="row"><button class="big" id="exportbank">Copy bank as text</button></div>
   <label>API key</label>
-  <div class="row"><button class="big" id="forget">Forget my API key</button></div>
+  <div class="row"><button class="big" id="forget">Forget my API keys</button></div>
 </div>
 
 <div id="budgetDlg"><div class="box">
@@ -215,8 +241,13 @@
 <div id="start">
   <h1>Undertekst</h1>
   <p>Point your phone at the TV. English appears on top, Danish below. Tap a word to see its match, double-tap to save it to your word bank.</p>
-  <input id="key" type="password" placeholder="Paste your Anthropic API key (sk-ant-...)" autocomplete="off">
-  <p style="font-size:13px">Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. It stays on this phone only.</p>
+  <select id="engStart" style="width:100%;max-width:420px;margin-top:14px">
+    <option value="claude">Claude AI (best: speakers + word links)</option>
+    <option value="gemini">Google Gemini AI (free tier available)</option>
+    <option value="free">Free: phone reads text + Google Translate</option>
+  </select>
+  <input id="key" type="password" autocomplete="off">
+  <p style="font-size:13px" id="keyhelp"></p>
   <button id="go">Start</button>
   <div id="err"></div>
 </div>
@@ -235,7 +266,8 @@
   // carry the key over from the previous version
   let oldKey = ''; try { oldKey = JSON.parse(localStorage.getItem('ut2_key') || '""'); } catch (e) {}
   const S = {
-    key: store.get('key', oldKey), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 1200)),
+    key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
+    gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 1200)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
     hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
@@ -331,14 +363,36 @@
   $('fsEn').oninput = e => { S.fsEn = +e.target.value; store.set('fsEn', S.fsEn); applyFonts(); };
   $('fsDa').oninput = e => { S.fsDa = +e.target.value; store.set('fsDa', S.fsDa); applyFonts(); };
   $('showspk').checked = S.showSpk;
-  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk); };
+  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free'); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
   $('model').value = S.model;
   $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
+  // engine choice
+  function showEngine() {
+    $('engine').value = S.engine;
+    $('engClaude').style.display = S.engine === 'claude' ? 'block' : 'none';
+    $('engGemini').style.display = S.engine === 'gemini' ? 'block' : 'none';
+    $('engFree').style.display = S.engine === 'free' ? 'block' : 'none';
+    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free');
+  }
+  $('engine').onchange = e => {
+    S.engine = e.target.value; store.set('engine', S.engine); showEngine();
+    if (S.engine === 'free') loadOCR().catch(err => setStatus(err.message));
+    if ((S.engine === 'claude' && !S.key) || (S.engine === 'gemini' && !S.gkey)) setStatus('Add your API key below for this engine.');
+    lastDaText = ''; updateCost && updateCost();
+  };
+  $('gmodel').value = S.gmodel;
+  $('gmodel').onchange = e => { S.gmodel = e.target.value; store.set('gmodel', S.gmodel); };
+  $('gfree').checked = S.gfree;
+  $('gfree').onchange = e => { S.gfree = e.target.checked; store.set('gfree', S.gfree); };
+  $('keyC').value = S.key || ''; $('keyG').value = S.gkey || '';
+  $('keyC').onchange = e => { S.key = e.target.value.trim(); store.set('key', S.key); };
+  $('keyG').onchange = e => { S.gkey = e.target.value.trim(); store.set('gkey', S.gkey); };
+  showEngine();
   $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
   $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
-  $('forget').onclick = () => { store.del('key'); try { localStorage.removeItem('ut2_key'); } catch (e) {} location.reload(); };
+  $('forget').onclick = () => { store.del('key'); store.del('gkey'); try { localStorage.removeItem('ut2_key'); } catch (e) {} location.reload(); };
   $('clearconv').onclick = () => { conv.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = ''; $('settings').style.display = 'none'; };
   $('exportbank').onclick = async () => {
     const txt = Object.values(bank).map(b => `${b.da}\t${b.en}\t${b.ctxDa || ''}`).join('\n');
@@ -370,8 +424,10 @@
   function isPunct(w) { return /^[^\p{L}\p{N}]+$/u.test(w); }
   function renderLine(line, lang) {
     const div = document.createElement('div'); div.className = 'line cur'; div.dataset.lid = line.id;
-    const tag = document.createElement('span'); tag.className = 'spk'; tag.textContent = line.spk || '?';
-    tag.style.background = spkColor(line.spk); div.appendChild(tag);
+    if (line.spk) {
+      const tag = document.createElement('span'); tag.className = 'spk'; tag.textContent = line.spk;
+      tag.style.background = spkColor(line.spk); div.appendChild(tag);
+    }
     const toks = lang === 'en' ? line.en : line.da;
     toks.forEach((t, i) => {
       const w = String(t[0]);
@@ -428,6 +484,26 @@
     // bring the matching word into view in the other panel
     const other = ps.find(x => x.dataset.lang !== el.dataset.lang);
     if (other) other.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    else if (el.dataset.lang === 'da') wordBubble(el);   // no match from the AI: look the word up
+  }
+  const wordCache = new Map();
+  async function lookupWord(w) {
+    w = clean(w); if (!w) return '';
+    if (wordCache.has(w.toLowerCase())) return wordCache.get(w.toLowerCase());
+    let tr = ''; try { tr = await googleTranslate(w); } catch (e) {}
+    if (tr) wordCache.set(w.toLowerCase(), tr);
+    return tr;
+  }
+  let bubbleEl = null, bubbleTimer = 0;
+  async function wordBubble(el) {
+    const tr = await lookupWord(el.textContent);
+    if (!tr || !el.classList.contains('hl')) return;
+    if (bubbleEl) bubbleEl.remove();
+    const r = el.getBoundingClientRect();
+    bubbleEl = document.createElement('div'); bubbleEl.className = 'bubble'; bubbleEl.textContent = tr;
+    bubbleEl.style.left = (r.left + r.width / 2) + 'px'; bubbleEl.style.top = (r.bottom + 6) + 'px';
+    document.body.appendChild(bubbleEl);
+    clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => { if (bubbleEl) { bubbleEl.remove(); bubbleEl = null; } }, 2500);
   }
 
   function saveWord(el) {
@@ -437,7 +513,10 @@
     if (g !== '0') {
       da = line.da.filter(t => String(t[1]) === g).map(t => clean(t[0])).join(' ');
       en = line.en.filter(t => String(t[1]) === g).map(t => clean(t[0])).join(' ');
-    } else if (el.dataset.lang === 'da') { da = clean(el.textContent); en = ''; }
+    } else if (el.dataset.lang === 'da') {
+      da = clean(el.textContent); en = wordCache.get(da.toLowerCase()) || '';
+      if (!en) lookupWord(da).then(tr => { const bb = bank[norm(da)]; if (bb && !bb.en && tr) { bb.en = tr; saveBank(); } });
+    }
     else { en = clean(el.textContent); da = ''; }
     if (!da && !en) return;
     const key = da ? norm(da) : 'en:' + norm(en);
@@ -665,7 +744,7 @@ Reply with JSON only, no other text:
 "roster" lists every speaker tag used so far with a short visual description (3-6 words) so you can recognise them in later frames.
 If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
 
-  async function ask(b64) {
+  async function askClaude(b64) {
     const recent = conv.slice(-4).map(l => `${l.spk}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
     const ctx = `Speaker roster so far: ${JSON.stringify(roster)}\nRecent dialogue, for context only (report what is on screen NOW, even if it repeats):\n${recent || '(none yet)'}`;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -684,7 +763,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       const err = new Error(msg); err.status = r.status; err.retryAfter = +(r.headers.get('retry-after') || 0); throw err;
     }
     const j = await r.json();
-    const cost = costOf(j.usage);
+    const cost = costOf(j.usage, 'claude');
     const t = (j.content || []).map(c => c.text || '').join('');
     const m = t.match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
     let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
@@ -702,11 +781,111 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return 2 * hit / (a.length + b.length - 2) > 0.8;
   }
 
+  function parseAI(t, cost) {
+    const m = (t || '').match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
+    let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
+    const ok = a => Array.isArray(a) && a.length && a.every(x => Array.isArray(x) && x.length >= 1);
+    const lines = (Array.isArray(o.lines) ? o.lines : []).filter(l => ok(l.da) && ok(l.en))
+      .map(l => ({ spk: String(l.spk || '?').slice(0, 4), da: l.da.map(x => [String(x[0]), +x[1] || 0]), en: l.en.map(x => [String(x[0]), +x[1] || 0]) }));
+    return { lines, cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+  }
+  function contextText() {
+    const recent = conv.slice(-4).map(l => `${l.spk || '?'}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
+    return `Speaker roster so far: ${JSON.stringify(roster)}\nRecent dialogue, for context only (report what is on screen NOW, even if it repeats):\n${recent || '(none yet)'}`;
+  }
+
+  // ---------- Google Gemini ----------
+  async function askGemini(b64) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${S.gmodel}:generateContent?key=${encodeURIComponent(S.gkey)}`;
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: contextText() }] }],
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 900, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
+      })
+    });
+    if (!r.ok) {
+      let msg = r.status + ''; try { const j = await r.json(); msg += ' ' + (j.error && j.error.message || ''); } catch (e) {}
+      const err = new Error(msg); err.status = (r.status === 400 && /API key/i.test(msg)) ? 401 : r.status; throw err;
+    }
+    const j = await r.json();
+    const u = j.usageMetadata || {};
+    const cost = costOf({ input_tokens: u.promptTokenCount || 0, output_tokens: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) }, 'gemini');
+    const c = ((j.candidates || [])[0] || {}).content;
+    return parseAI(c && c.parts ? c.parts.map(p => p.text || '').join('') : '', cost);
+  }
+
+  // ---------- Free: on-phone text reader + Google Translate ----------
+  async function googleTranslate(text) {
+    const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=da&tl=en&dt=t&q=' + encodeURIComponent(text);
+    const r = await fetch(u); if (!r.ok) throw new Error('Google Translate ' + r.status);
+    const j = await r.json(); return j[0].map(x => x[0]).join('');
+  }
+  let ocr = null, ocrLoading = null;
+  function loadOCR() {
+    if (ocr) return Promise.resolve(ocr);
+    if (ocrLoading) return ocrLoading;
+    setStatus('Loading the Danish text reader (one time, ~10 s)…');
+    ocrLoading = new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+      sc.onload = async () => {
+        try { const w = await Tesseract.createWorker('dan'); await w.setParameters({ tessedit_pageseg_mode: '3' }); ocr = w; setStatus(''); res(w); }
+        catch (e) { ocrLoading = null; rej(e); }
+      };
+      sc.onerror = () => { ocrLoading = null; rej(new Error('Could not load the text reader. Check your internet.')); };
+      document.head.appendChild(sc);
+    });
+    return ocrLoading;
+  }
+  const ocv = document.createElement('canvas'), ocx = ocv.getContext('2d', { willReadFrequently: true });
+  async function askFree() {
+    const w = await loadOCR();
+    // keep only white/yellow subtitle-like pixels: they become black text on white
+    const W = cv.width, H = cv.height; ocv.width = W; ocv.height = H; ocx.drawImage(cv, 0, 0);
+    const img = ocx.getImageData(0, 0, W, H), d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const R = d[i], G = d[i + 1], B = d[i + 2], lum = 0.299 * R + 0.587 * G + 0.114 * B;
+      const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+      const txt = (lum > 175 && mx - mn < 70) || (R > 170 && G > 150 && B < 120);
+      d[i] = d[i + 1] = d[i + 2] = txt ? 0 : 255;
+    }
+    ocx.putImageData(img, 0, 0);
+    const { data } = await w.recognize(ocv);
+    const good = (data.lines || []).filter(l => {
+      const t = (l.text || '').trim(), letters = (t.match(/\p{L}/gu) || []).length;
+      return l.confidence > 55 && letters >= 3 && letters / Math.max(1, t.replace(/\s/g, '').length) > 0.6;
+    });
+    if (!good.length) return { lines: [], cost: 0 };
+    // subtitles are the lowest block of text: take the bottom line and anything just above it
+    good.sort((a, b) => a.bbox.y1 - b.bbox.y1);
+    const last = good[good.length - 1], lh = last.bbox.y1 - last.bbox.y0;
+    const block = good.filter(l => l.bbox.y1 >= last.bbox.y0 - 2.6 * lh);
+    const raw = block.map(l => l.text.replace(/\|/g, 'I').replace(/\s+/g, ' ').trim());
+    const parts = [];
+    for (const t of raw) { if (/^[-–]/.test(t) || !parts.length) parts.push(t.replace(/^[-–]\s*/, '')); else parts[parts.length - 1] += ' ' + t; }
+    const lines = [];
+    for (const da of parts) {
+      const en = await googleTranslate(da);
+      lines.push({ spk: '', da: da.split(' ').map(x => [x, 0]), en: en.split(' ').map(x => [x, 0]) });
+    }
+    return { lines, cost: 0 };
+  }
+
+  function ask(b64) {
+    if (S.engine === 'gemini') return askGemini(b64);
+    if (S.engine === 'free') return askFree();
+    return askClaude(b64);
+  }
+
   // ---------- cost tracking ----------
   const PRICES = { 'claude-haiku-5-5': [0.10, 0.50], 'claude-sonnet-5-5': [2, 10] };   // USD per million tokens (in, out)
-  function costOf(u) {
+  const GPRICES = { 'gemini-2.5-flash': [0.30, 2.50], 'gemini-2.5-flash-lite': [0.10, 0.40] };
+  function costOf(u, engine) {
     if (!u) return 0;
-    const p = PRICES[S.model] || PRICES['claude-haiku-5-5'];
+    if (engine === 'gemini' && S.gfree) return 0;
+    const p = engine === 'gemini' ? (GPRICES[S.gmodel] || GPRICES['gemini-2.5-flash']) : (PRICES[S.model] || PRICES['claude-haiku-5-5']);
     const inTok = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1;
     return (inTok * p[0] + (u.output_tokens || 0) * p[1]) / 1e6;
   }
@@ -725,11 +904,11 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   }
   function updateCost() {
     const day = store.get('costDay', { d: today(), usd: 0 });
-    $('cost').textContent = sessionReqs ? fmt(sessionCost) : '';
+    $('cost').textContent = sessionReqs ? (sessionCost === 0 ? 'free' : fmt(sessionCost)) : '';
     $('cost').classList.toggle('warn', S.budget > 0 && sessionCost > 0.8 * budgetMark);
     const ph = perHour();
     $('estnote').textContent = ph === null ? 'Cost per hour shows here after the first few translations.'
-      : `At this speed: about ${fmt(ph)} per hour of TV. Slower = cheaper.`;
+      : ph === 0 ? 'This engine costs nothing at this speed.' : `At this speed: about ${fmt(ph)} per hour of TV. Slower = cheaper.`;
     $('spendnote').textContent = `This session: ${fmt(sessionCost)} (${sessionReqs} looks) · Today: ${fmt(day.d === today() ? day.usd : 0)} · All time: ${fmt(store.get('costAll', 0))}`;
   }
   function addCost(c) {
@@ -756,7 +935,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1, pauseUntil = 0;
   const setStatus = t => { $('status').textContent = t; };
   async function tick() {
-    if (!live || document.hidden || inFlight >= 2 || Date.now() < pauseUntil) return;
+    if (!live || document.hidden || inFlight >= (S.engine === 'free' ? 1 : 2) || Date.now() < pauseUntil) return;
     const b64 = grab(); if (!b64) return;
     const my = ++seq; inFlight++; $('dot').classList.add('busy');
     const t0 = Date.now();
@@ -773,11 +952,11 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
         if (!similar(daText, lastDaText)) { lastDaText = daText; addLines(res.lines); }
       } else if (Date.now() - lastHit > 4000) setStatus('Looking for subtitles…');
     } catch (e) {
-      if (e.status === 401) { setStatus('API key rejected. Settings → Forget my API key.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
+      if (e.status === 401 || e.status === 403) { setStatus('API key rejected. Check the key in Settings.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
       else if (e.status === 429) {
         backoff = Math.min(backoff * 1.5, 5);
         pauseUntil = Date.now() + 1000 * (e.retryAfter || 4);
-        setStatus('Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
+        setStatus(S.engine === 'gemini' && S.gfree ? 'Gemini free-tier limit hit. Set How often to look to 5 s or slower.' : 'Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
       }
       else if (e.status === 529 || e.status >= 500) { backoff = Math.min(backoff * 1.5, 5); pauseUntil = Date.now() + 3000; setStatus('Claude is overloaded right now, retrying…'); }
       else if (/credit|billing/i.test(e.message)) setStatus('No API credit. Add credit at console.anthropic.com → Billing.');
@@ -790,15 +969,31 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   window.__ut = { addLines, bank: () => bank };
 
   // ---------- start ----------
-  $('key').value = S.key || '';
+  const KEYHELP = {
+    claude: ['Paste your Anthropic API key (sk-ant-...)', 'Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. About $1 per hour of TV. It stays on this phone only.'],
+    gemini: ['Paste your Gemini API key', 'Get one free at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. The free tier is slower (a few looks per minute). It stays on this phone only.'],
+    free: ['', 'No key needed. Less accurate than the AI engines, and no speaker tags.']
+  };
+  function startScreenEngine() {
+    const e = $('engStart').value;
+    $('key').style.display = e === 'free' ? 'none' : '';
+    $('key').placeholder = KEYHELP[e][0];
+    $('key').value = e === 'gemini' ? (S.gkey || '') : e === 'claude' ? (S.key || '') : '';
+    $('keyhelp').innerHTML = KEYHELP[e][1];
+  }
+  $('engStart').value = S.engine; startScreenEngine();
+  $('engStart').onchange = startScreenEngine;
   $('go').onclick = async () => {
     const err = $('err'); err.textContent = '';
-    const k = $('key').value.trim();
-    if (!k.startsWith('sk-ant-')) { err.textContent = 'Paste your Anthropic API key first (it starts with sk-ant-).'; return; }
+    const eng = $('engStart').value, k = $('key').value.trim();
+    if (eng === 'claude' && !k.startsWith('sk-ant-')) { err.textContent = 'Paste your Anthropic API key first (it starts with sk-ant-).'; return; }
+    if (eng === 'gemini' && k.length < 20) { err.textContent = 'Paste your Gemini API key first.'; return; }
+    S.engine = eng; store.set('engine', eng); showEngine();
+    if (eng === 'claude') { S.key = k; store.set('key', k); $('keyC').value = k; }
+    if (eng === 'gemini') { S.gkey = k; store.set('gkey', k); $('keyG').value = k; }
     if (!window.isSecureContext || !navigator.mediaDevices) {
       err.textContent = 'The camera only works from an https:// link opened in Safari or Chrome.'; return;
     }
-    S.key = k; store.set('key', k);
     $('go').disabled = true; $('go').textContent = 'Starting…';
     try { await startCamera(); }
     catch (e) {
@@ -806,7 +1001,9 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       $('go').disabled = false; $('go').textContent = 'Start'; return;
     }
     $('start').style.display = 'none';
-    keepAwake(); setStatus('Looking for subtitles…'); loop();
+    keepAwake(); setStatus('Looking for subtitles…');
+    if (S.engine === 'free') loadOCR().catch(e => setStatus(e.message));
+    loop();
   };
 })();
 </script>
