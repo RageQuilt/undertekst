@@ -42,6 +42,14 @@
   #status { flex: 1; font-size: 12px; color: #ffd400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex: none; }
   #dot.busy { background: #ffd400; }
+  #cost { font-size: 12px; color: #9be29b; font-variant-numeric: tabular-nums; }
+  #cost.warn { color: #ffb36b; }
+  .note { font-size: 13px; color: #999; margin-top: 6px; line-height: 1.4; }
+  #budgetDlg { position: fixed; inset: 0; z-index: 65; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; padding: 24px; }
+  #budgetDlg .box { background: #161616; border: 1px solid #333; border-radius: 16px; padding: 20px; max-width: 360px; width: 100%; }
+  #budgetDlg h3 { margin: 0 0 8px; }
+  #budgetDlg p { color: #bbb; line-height: 1.4; margin: 0 0 16px; }
+  #budgetDlg .row { gap: 10px; }
   .ib { background: #222; border: 1px solid #444; color: #fff; border-radius: 10px; padding: 6px 10px; font-size: 14px; font-family: inherit; }
   .ib.on { background: #ffd400; color: #000; border-color: #ffd400; font-weight: 700; }
 
@@ -118,6 +126,7 @@
   <div class="grip" id="gEnT"></div>
   <div class="head">
     <span id="dot"></span><span class="tag">EN</span><span id="status"></span>
+    <span id="cost"></span>
     <button class="ib on" id="live">Live</button>
     <button class="ib" id="bankbtn">Bank</button>
     <button class="ib" id="setbtn">⚙</button>
@@ -168,10 +177,23 @@
   <label>AI model</label>
   <select id="model">
     <option value="claude-haiku-5-5">Fast (Claude Haiku), recommended</option>
-    <option value="claude-sonnet-5-5">More accurate, slower (Claude Sonnet)</option>
+    <option value="claude-sonnet-5-5">More accurate, slower (Claude Sonnet) · about 20× the cost</option>
   </select>
   <label>How often to look: <span id="ivv"></span></label>
-  <input type="range" id="iv" min="600" max="3000" step="100">
+  <input type="range" id="iv" min="800" max="3000" step="100">
+  <div class="note" id="estnote"></div>
+  <label>Spending limit per session</label>
+  <select id="budget">
+    <option value="0.25">$0.25</option>
+    <option value="0.5">$0.50</option>
+    <option value="1">$1</option>
+    <option value="2">$2</option>
+    <option value="5">$5</option>
+    <option value="0">No limit</option>
+  </select>
+  <div class="note">When the limit is reached the app pauses and asks before spending more.</div>
+  <label>Spending so far</label>
+  <div class="note" id="spendnote"></div>
   <div id="zoomwrap" style="display:none">
     <label>Camera zoom: <span id="zoomv"></span></label>
     <input type="range" id="zoom" step="0.1">
@@ -183,6 +205,12 @@
   <label>API key</label>
   <div class="row"><button class="big" id="forget">Forget my API key</button></div>
 </div>
+
+<div id="budgetDlg"><div class="box">
+  <h3>Spending limit reached</h3>
+  <p id="budgetMsg"></p>
+  <div class="row"><button class="big" id="budgetStop">Stop here</button><button class="big on" id="budgetGo">Keep going</button></div>
+</div></div>
 
 <div id="start">
   <h1>Undertekst</h1>
@@ -207,7 +235,7 @@
   // carry the key over from the previous version
   let oldKey = ''; try { oldKey = JSON.parse(localStorage.getItem('ut2_key') || '""'); } catch (e) {}
   const S = {
-    key: store.get('key', oldKey), model: store.get('model', 'claude-haiku-5-5'), iv: store.get('iv', 1000),
+    key: store.get('key', oldKey), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 1200)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
     hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
@@ -653,16 +681,17 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     });
     if (!r.ok) {
       let msg = r.status + ''; try { const j = await r.json(); msg += ' ' + (j.error && j.error.message || ''); } catch (e) {}
-      const err = new Error(msg); err.status = r.status; throw err;
+      const err = new Error(msg); err.status = r.status; err.retryAfter = +(r.headers.get('retry-after') || 0); throw err;
     }
     const j = await r.json();
+    const cost = costOf(j.usage);
     const t = (j.content || []).map(c => c.text || '').join('');
-    const m = t.match(/\{[\s\S]*\}/); if (!m) return { lines: [] };
-    let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [] }; }
+    const m = t.match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
+    let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
     const ok = a => Array.isArray(a) && a.length && a.every(x => Array.isArray(x) && x.length >= 1);
     const lines = (Array.isArray(o.lines) ? o.lines : []).filter(l => ok(l.da) && ok(l.en))
       .map(l => ({ spk: String(l.spk || '?').slice(0, 4), da: l.da.map(x => [String(x[0]), +x[1] || 0]), en: l.en.map(x => [String(x[0]), +x[1] || 0]) }));
-    return { lines, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+    return { lines, cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
   }
 
   function similar(a, b) {
@@ -673,25 +702,84 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return 2 * hit / (a.length + b.length - 2) > 0.8;
   }
 
-  let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1;
+  // ---------- cost tracking ----------
+  const PRICES = { 'claude-haiku-5-5': [0.10, 0.50], 'claude-sonnet-5-5': [2, 10] };   // USD per million tokens (in, out)
+  function costOf(u) {
+    if (!u) return 0;
+    const p = PRICES[S.model] || PRICES['claude-haiku-5-5'];
+    const inTok = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1;
+    return (inTok * p[0] + (u.output_tokens || 0) * p[1]) / 1e6;
+  }
+  const today = () => new Date().toISOString().slice(0, 10);
+  let sessionCost = 0, sessionReqs = 0, avgLatency = 1500;
+  S.budget = store.get('budget', 1);
+  let budgetMark = S.budget;
+  $('budget').value = String(S.budget);
+  $('budget').onchange = e => { S.budget = +e.target.value; store.set('budget', S.budget); budgetMark = sessionCost + S.budget; updateCost(); };
+  const fmt = v => v < 0.995 ? (v * 100).toFixed(v < 0.1 ? 1 : 0) + '¢' : '$' + v.toFixed(2);
+  function perHour() {
+    if (!sessionReqs) return null;
+    const perReq = sessionCost / sessionReqs;
+    const reqPerSec = Math.min(1000 / S.iv, 2000 / avgLatency);   // never more than 2 requests in flight
+    return perReq * reqPerSec * 3600;
+  }
+  function updateCost() {
+    const day = store.get('costDay', { d: today(), usd: 0 });
+    $('cost').textContent = sessionReqs ? fmt(sessionCost) : '';
+    $('cost').classList.toggle('warn', S.budget > 0 && sessionCost > 0.8 * budgetMark);
+    const ph = perHour();
+    $('estnote').textContent = ph === null ? 'Cost per hour shows here after the first few translations.'
+      : `At this speed: about ${fmt(ph)} per hour of TV. Slower = cheaper.`;
+    $('spendnote').textContent = `This session: ${fmt(sessionCost)} (${sessionReqs} looks) · Today: ${fmt(day.d === today() ? day.usd : 0)} · All time: ${fmt(store.get('costAll', 0))}`;
+  }
+  function addCost(c) {
+    sessionCost += c; sessionReqs++;
+    const day = store.get('costDay', { d: today(), usd: 0 });
+    store.set('costDay', { d: today(), usd: (day.d === today() ? day.usd : 0) + c });
+    store.set('costAll', store.get('costAll', 0) + c);
+    updateCost();
+    if (S.budget > 0 && sessionCost >= budgetMark && live) {
+      live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused';
+      const ph = perHour();
+      $('budgetMsg').textContent = `You've spent ${fmt(sessionCost)} this session` + (ph ? `, about ${fmt(ph)} per hour at this speed` : '') +
+        `. Keep going for another ${fmt(S.budget)}?`;
+      $('budgetDlg').style.display = 'flex';
+    }
+  }
+  $('budgetGo').onclick = () => { budgetMark = sessionCost + S.budget; $('budgetDlg').style.display = 'none';
+    live = true; $('live').classList.add('on'); $('live').textContent = 'Live'; updateCost(); };
+  $('budgetStop').onclick = () => { $('budgetDlg').style.display = 'none'; };
+  $('setbtn').addEventListener('click', updateCost);
+  $('iv').addEventListener('input', updateCost);
+  updateCost();
+
+  let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1, pauseUntil = 0;
   const setStatus = t => { $('status').textContent = t; };
   async function tick() {
-    if (!live || document.hidden || inFlight >= 2) return;
+    if (!live || document.hidden || inFlight >= 2 || Date.now() < pauseUntil) return;
     const b64 = grab(); if (!b64) return;
     const my = ++seq; inFlight++; $('dot').classList.add('busy');
+    const t0 = Date.now();
     try {
       const res = await ask(b64);
-      backoff = 1;
+      avgLatency = avgLatency * 0.8 + (Date.now() - t0) * 0.2;
+      addCost(res.cost || 0);
+      backoff = Math.max(1, backoff * 0.9);
       if (my < shownSeq) return;
       if (res.lines.length) {
-        shownSeq = my; lastHit = Date.now(); setStatus('');
+        shownSeq = my; lastHit = Date.now(); if (Date.now() > pauseUntil) setStatus('');
         if (res.roster) roster = Object.assign(roster, res.roster);
         const daText = res.lines.map(l => l.da.map(t => t[0]).join(' ')).join(' ');
         if (!similar(daText, lastDaText)) { lastDaText = daText; addLines(res.lines); }
       } else if (Date.now() - lastHit > 4000) setStatus('Looking for subtitles…');
     } catch (e) {
       if (e.status === 401) { setStatus('API key rejected. Settings → Forget my API key.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
-      else if (e.status === 429 || e.status === 529) { backoff = Math.min(backoff * 1.6, 6); setStatus('AI busy, slowing down…'); }
+      else if (e.status === 429) {
+        backoff = Math.min(backoff * 1.5, 5);
+        pauseUntil = Date.now() + 1000 * (e.retryAfter || 4);
+        setStatus('Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
+      }
+      else if (e.status === 529 || e.status >= 500) { backoff = Math.min(backoff * 1.5, 5); pauseUntil = Date.now() + 3000; setStatus('Claude is overloaded right now, retrying…'); }
       else if (/credit|billing/i.test(e.message)) setStatus('No API credit. Add credit at console.anthropic.com → Billing.');
       else setStatus('Problem: ' + (e.message || e));
     } finally { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); }
