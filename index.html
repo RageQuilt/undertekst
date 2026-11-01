@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Undertekst">
+<meta name="theme-color" content="#000000">
+<title>Undertekst</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+
+  #out { position: fixed; left: 0; right: 0; top: 0; z-index: 10;
+    padding: calc(env(safe-area-inset-top) + 14px) 18px 14px; background: rgba(0,0,0,0.80); min-height: 100px; }
+  #en { font-size: var(--fs, 28px); line-height: 1.25; font-weight: 650; white-space: pre-line; min-height: 1.25em; transition: opacity .4s; }
+  #da { font-size: 14px; color: #aaa; margin-top: 6px; white-space: pre-line; }
+  #out.stale #en { opacity: 0.4; }
+  #status { font-size: 12px; color: #ffd400; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex: none; }
+  #dot.busy { background: #ffd400; }
+
+  #hist { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 20; overflow-y: auto;
+    padding: calc(env(safe-area-inset-top) + 16px) 16px 110px; display: none; }
+  #hist .item { border-bottom: 1px solid #333; padding: 10px 0; }
+  #hist .e { font-size: 18px; }
+  #hist .d { font-size: 13px; color: #999; margin-top: 3px; white-space: pre-line; }
+
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; justify-content: center;
+    padding: 10px 10px calc(env(safe-area-inset-bottom) + 10px); background: rgba(0,0,0,0.55); z-index: 30; }
+  button, select, input[type=password], input[type=text] { font: inherit; color: #fff; background: #222;
+    border: 1px solid #444; border-radius: 12px; padding: 12px 14px; font-size: 15px; }
+  button.on { background: #ffd400; color: #000; border-color: #ffd400; font-weight: 700; }
+
+  #settings { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: #111; border-top: 1px solid #333;
+    padding: 16px 16px calc(env(safe-area-inset-bottom) + 84px); display: none; }
+  #settings label { display: block; margin: 12px 0 4px; font-size: 14px; color: #ccc; }
+  #settings input[type=range], #settings select { width: 100%; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+
+  #start { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  #start h1 { margin: 0 0 8px; font-size: 32px; }
+  #start p { color: #aaa; max-width: 420px; line-height: 1.45; margin: 8px 0; }
+  #start input { width: 100%; max-width: 420px; margin-top: 14px; }
+  #go { margin-top: 16px; font-size: 20px; padding: 16px 30px; background: #ffd400; color: #000; border: 0; font-weight: 700; }
+  #err { color: #ff6b6b; margin-top: 14px; max-width: 420px; line-height: 1.4; }
+  a { color: #ffd400; }
+</style>
+</head>
+<body>
+
+<video id="video" playsinline muted autoplay></video>
+
+<div id="out">
+  <div id="en">Point your phone at the TV</div>
+  <div id="da"></div>
+  <div id="status"><span id="dot"></span><span id="stxt"></span></div>
+</div>
+
+<div id="hist"></div>
+
+<div id="settings">
+  <label>AI model</label>
+  <select id="model">
+    <option value="claude-haiku-5-5">Fast (Claude Haiku), recommended</option>
+    <option value="claude-sonnet-5-5">More accurate, slower (Claude Sonnet)</option>
+  </select>
+  <label>How often to look: <span id="ivv"></span></label>
+  <input type="range" id="iv" min="600" max="3000" step="100">
+  <div id="zoomwrap" style="display:none">
+    <label>Camera zoom: <span id="zoomv"></span></label>
+    <input type="range" id="zoom" step="0.1">
+  </div>
+  <label>Text size</label>
+  <div class="row"><button id="fsminus">A−</button><button id="fsplus">A+</button></div>
+  <label>API key</label>
+  <div class="row"><button id="forget">Forget my API key</button></div>
+</div>
+
+<div id="bar">
+  <button id="live" class="on">Live</button>
+  <button id="histbtn">History</button>
+  <button id="setbtn">Settings</button>
+</div>
+
+<div id="start">
+  <h1>Undertekst</h1>
+  <p>Point your phone at the TV. AI finds the Danish subtitles anywhere in the picture and shows them in English, live.</p>
+  <input id="key" type="password" placeholder="Paste your Anthropic API key (sk-ant-...)" autocomplete="off">
+  <p style="font-size:13px">Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. It stays on this phone only.</p>
+  <button id="go">Start</button>
+  <div id="err"></div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), enEl = $('en'), daEl = $('da'), stxt = $('stxt'), dot = $('dot'), outEl = $('out');
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('ut2_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('ut2_' + k, JSON.stringify(v)); } catch (e) {} },
+    del(k) { try { localStorage.removeItem('ut2_' + k); } catch (e) {} }
+  };
+  const S = {
+    key: store.get('key', ''), model: store.get('model', 'claude-haiku-5-5'),
+    iv: store.get('iv', 1000), fs: store.get('fs', 28)
+  };
+  $('key').value = S.key;
+  $('model').value = S.model;
+  $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
+  document.documentElement.style.setProperty('--fs', S.fs + 'px');
+
+  // ---------- controls ----------
+  let live = true;
+  $('live').onclick = () => { live = !live; $('live').classList.toggle('on', live); $('live').textContent = live ? 'Live' : 'Paused'; };
+  const toggle = (panel, btn) => () => {
+    const p = $(panel), open = p.style.display === 'block';
+    if (!open && panel === 'hist') renderHist();
+    p.style.display = open ? 'none' : 'block'; $(btn).classList.toggle('on', !open);
+  };
+  $('histbtn').onclick = toggle('hist', 'histbtn');
+  $('setbtn').onclick = toggle('settings', 'setbtn');
+  $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
+  $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
+  const setFs = v => { S.fs = Math.min(Math.max(v, 16), 60); store.set('fs', S.fs); document.documentElement.style.setProperty('--fs', S.fs + 'px'); };
+  $('fsminus').onclick = () => setFs(S.fs - 3);
+  $('fsplus').onclick = () => setFs(S.fs + 3);
+  $('forget').onclick = () => { store.del('key'); location.reload(); };
+
+  const history = [];
+  function renderHist() {
+    const h = $('hist'); h.innerHTML = history.length ? '' : '<div style="color:#999">Nothing translated yet.</div>';
+    for (let i = history.length - 1; i >= 0; i--) {
+      const d = document.createElement('div'); d.className = 'item';
+      const a = document.createElement('div'); a.className = 'e'; a.textContent = history[i].en;
+      const b = document.createElement('div'); b.className = 'd'; b.textContent = history[i].da;
+      d.append(a, b); h.appendChild(d);
+    }
+  }
+
+  // ---------- camera ----------
+  async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    video.srcObject = stream; await video.play();
+    const track = stream.getVideoTracks()[0];
+    try {
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if (caps.zoom) {
+        const z = $('zoom'); z.min = caps.zoom.min; z.max = caps.zoom.max; z.step = caps.zoom.step || 0.1;
+        z.value = track.getSettings().zoom || caps.zoom.min; $('zoomv').textContent = (+z.value).toFixed(1) + '×';
+        $('zoomwrap').style.display = 'block';
+        z.oninput = () => { $('zoomv').textContent = (+z.value).toFixed(1) + '×';
+          track.applyConstraints({ advanced: [{ zoom: +z.value }] }).catch(() => {}); };
+      }
+    } catch (e) {}
+  }
+  async function keepAwake() { try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+  // ---------- frame grab (whole camera view) ----------
+  const cv = document.createElement('canvas'), cx = cv.getContext('2d');
+  function grab() {
+    const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
+    const W = Math.min(1280, vw), H = Math.round(vh * W / vw);
+    cv.width = W; cv.height = H; cx.drawImage(video, 0, 0, W, H);
+    return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
+  }
+
+  // ---------- AI ----------
+  const SYSTEM = `You are a live subtitle translator. Each image is a phone-camera photo of a TV or screen showing Danish programming.
+Find the dialogue subtitles in the picture (usually 1-2 lines of white or yellow text near the bottom of the TV image, but they can be anywhere; the TV may be small, tilted or off-centre in the photo).
+Read the Danish subtitle text and translate it into natural, idiomatic English.
+Ignore channel logos, clocks, tickers, menus and any other on-screen text that is not dialogue subtitles.
+If two speakers are shown with dashes, keep them on separate lines.
+Reply with JSON only, no other text: {"da":"<Danish subtitle as shown>","en":"<English translation>"}
+If no subtitle is visible or it is unreadable, reply exactly: {"da":"","en":""}`;
+
+  let lastDa = '';
+  async function ask(b64) {
+    const ctx = lastDa ? `Previous subtitle, for context only (do not repeat it unless it is still on screen): "${lastDa}"` : 'Translate the subtitle.';
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: S.model, max_tokens: 300, system: SYSTEM,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+          { type: 'text', text: ctx }
+        ] }]
+      })
+    });
+    if (!r.ok) {
+      let msg = r.status + ''; try { const j = await r.json(); msg += ' ' + (j.error && j.error.message || ''); } catch (e) {}
+      const err = new Error(msg); err.status = r.status; throw err;
+    }
+    const j = await r.json();
+    const t = (j.content || []).map(c => c.text || '').join('');
+    const m = t.match(/\{[\s\S]*\}/);
+    if (!m) return { da: '', en: '' };
+    try { const o = JSON.parse(m[0]); return { da: (o.da || '').trim(), en: (o.en || '').trim() }; }
+    catch (e) { return { da: '', en: '' }; }
+  }
+
+  const norm = t => t.toLowerCase().replace(/[^a-zæøåéü]/g, '');
+  function similar(a, b) {
+    a = norm(a); b = norm(b); if (!a || !b) return false; if (a === b) return true;
+    if (a.length < 3 || b.length < 3) return false;
+    const m = new Map(); for (let i = 0; i < a.length - 1; i++) { const g = a.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
+    let hit = 0; for (let i = 0; i < b.length - 1; i++) { const g = b.substr(i, 2), c = m.get(g); if (c) { hit++; m.set(g, c - 1); } }
+    return 2 * hit / (a.length + b.length - 2) > 0.8;
+  }
+
+  // ---------- live loop: overlapping requests, newest answer wins ----------
+  let seq = 0, shownSeq = 0, inFlight = 0, lastHit = 0, backoff = 1;
+  function setStatus(t) { stxt.textContent = t; }
+
+  async function tick() {
+    if (!live || document.hidden || inFlight >= 2) return;
+    const b64 = grab(); if (!b64) return;
+    const my = ++seq; inFlight++; dot.classList.add('busy');
+    try {
+      const res = await ask(b64);
+      backoff = 1;
+      if (my < shownSeq) return;          // an answer to a newer frame already arrived
+      if (res.en) {
+        shownSeq = my; lastHit = Date.now(); outEl.classList.remove('stale'); setStatus('');
+        if (!similar(res.da, lastDa)) {
+          enEl.textContent = res.en; daEl.textContent = res.da; lastDa = res.da;
+          history.push(res); if (history.length > 300) history.shift();
+        }
+      } else if (Date.now() - lastHit > 4000) {
+        outEl.classList.add('stale');
+        setStatus('Looking for subtitles…');
+      }
+    } catch (e) {
+      if (e.status === 401) { setStatus('API key rejected. Settings → Forget my API key, then paste a valid one.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
+      else if (e.status === 429 || e.status === 529) { backoff = Math.min(backoff * 1.6, 6); setStatus('AI is busy, slowing down a little…'); }
+      else if (e.status === 400 && /credit|billing/i.test(e.message)) { setStatus('No API credit. Add credit at console.anthropic.com → Billing.'); }
+      else setStatus('Problem: ' + (e.message || e) + ' (retrying)');
+    } finally {
+      inFlight--; if (!inFlight) dot.classList.remove('busy');
+    }
+  }
+  async function loop() {
+    for (;;) { tick(); await new Promise(r => setTimeout(r, S.iv * backoff)); }
+  }
+
+  // ---------- start ----------
+  $('go').onclick = async () => {
+    const err = $('err'); err.textContent = '';
+    const k = $('key').value.trim();
+    if (!k.startsWith('sk-ant-')) { err.textContent = 'Paste your Anthropic API key first (it starts with sk-ant-).'; return; }
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      err.textContent = 'The camera only works from an https:// link opened in Safari or Chrome, not from a downloaded file or inside another app.'; return;
+    }
+    S.key = k; store.set('key', k);
+    $('go').disabled = true; $('go').textContent = 'Starting…';
+    try { await startCamera(); }
+    catch (e) {
+      err.textContent = 'Camera blocked (' + (e.name || e.message) + '). Allow camera for this site: iPhone: aA button → Website Settings → Camera → Allow. Android: icon left of the address → Permissions → Camera → Allow. Then reload.';
+      $('go').disabled = false; $('go').textContent = 'Start'; return;
+    }
+    $('start').style.display = 'none';
+    keepAwake(); setStatus('Looking for subtitles…'); loop();
+  };
+})();
+</script>
+</body>
+</html>
