@@ -209,6 +209,8 @@
   <select id="engine">
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
+    <option value="live">🎧 Live audio: Gemini Live Translate (real-time, best)</option>
+    <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
   </select>
   <div id="engClaude">
@@ -343,6 +345,8 @@
   <select id="engStart" style="width:100%;max-width:420px;margin-top:14px">
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
+    <option value="live">🎧 Live audio: Gemini Live Translate (real-time, best)</option>
+    <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
   </select>
   <input id="key" type="password" autocomplete="off">
@@ -465,7 +469,7 @@
   $('fsEn').oninput = e => { S.fsEn = +e.target.value; store.set('fsEn', S.fsEn); applyFonts(); };
   $('fsDa').oninput = e => { S.fsDa = +e.target.value; store.set('fsDa', S.fsDa); applyFonts(); };
   $('showspk').checked = S.showSpk;
-  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free'); };
+  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || S.engine === 'live' || S.engine === 'livefree'); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
   $('showdiag').checked = S.diag; $('diag').style.display = S.diag ? 'block' : 'none';
@@ -478,9 +482,9 @@
   function showEngine() {
     $('engine').value = S.engine;
     $('engClaude').style.display = S.engine === 'claude' ? 'block' : 'none';
-    $('engGemini').style.display = S.engine === 'gemini' ? 'block' : 'none';
+    $('engGemini').style.display = (S.engine === 'gemini' || S.engine === 'live') ? 'block' : 'none';
     $('engFree').style.display = S.engine === 'free' ? 'block' : 'none';
-    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free');
+    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || isLive());
   }
   $('engine').onchange = e => {
     S.engine = e.target.value; store.set('engine', S.engine); showEngine();
@@ -1326,7 +1330,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
   async function watch() {
     for (;;) {
       await new Promise(r => setTimeout(r, inFlight >= cap() ? 200 : 120));
-      if (!live || document.hidden) continue;
+      if (!live || document.hidden || isLive()) continue;
       const now = Date.now();
       if (tvControlled() && !TV.playing) continue;                 // TV paused by the app: nothing new will appear, and the pause screen must not count
       if (now < ignoreUntil) {                                     // TV just resumed or skipped: let Netflix's overlay fade, then take the picture as the new baseline
@@ -1422,7 +1426,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
 
 
   // test hook: lets a page preview run without a camera or API key
-  window.__ut = { snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
+  window.__ut = { LV: () => LV, snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
 
   // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
   // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
@@ -1590,7 +1594,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
     const i = SIZES.findIndex(z => z[1] === S.fsEn), n = SIZES[(i + 1) % SIZES.length];
     S.fsEn = n[1]; S.fsDa = n[2]; store.set('fsEn', S.fsEn); store.set('fsDa', S.fsDa); applyFonts(); quickUI();
   };
-  $('qHear').onclick = () => { S.hear = !S.hear; store.set('hear', S.hear); S.hear ? startHearing() : stopHearing(); quickUI(); };
+  $('qHear').onclick = () => { if (isLive()) { quickToast('Live audio mode already listens'); return; } S.hear = !S.hear; store.set('hear', S.hear); S.hear ? startHearing() : stopHearing(); quickUI(); };
   $('qCult').onclick = () => {
     S.cult = { off: 'notes', notes: 'pause', pause: 'off' }[S.cult]; store.set('cult', S.cult); quickUI();
     quickToast({ off: 'Danish moments off', notes: 'Notes only, no pausing', pause: 'Will pause the TV on Danish moments' }[S.cult]);
@@ -1895,17 +1899,193 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   document.addEventListener('touchstart', wake, { capture: true, passive: true });
   wake();
 
+  // ---------- 🎧 LIVE AUDIO: translate what is SAID, while it is being said ----------
+  // Instead of photographing subtitles, the phone listens to the TV. The text streams in word by word.
+  //   'live'     = Gemini Live Translate: one open connection, Danish words + English translation streamed back.
+  //   'livefree' = the phone's own Danish speech recognition + Google Translate (free, less accurate).
+  function isLive() { return S.engine === 'live' || S.engine === 'livefree'; }
+  const LV = { on: false, ws: null, ready: false, ctx: null, node: null, stream: null, cur: null, lastText: 0,
+    secs: 0, level: 0, rec: null, trTimer: 0, trSeq: 0, closing: false };
+  const LIVE_PRICE_PER_MIN = 0.0368;
+
+  // --- a line that grows word by word, then gets closed at a pause ---
+  function liveStartLine() {
+    sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
+    sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur')); sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    const line = { id: ++lineId, spk: '', da: [], en: [], daText: '', enText: '', t: Date.now(), seq: 1e12, live: true };
+    conv.push(line);
+    sEn.appendChild(renderLine(line, 'en')); sDa.appendChild(renderLine(line, 'da'));
+    LV.cur = line; return line;
+  }
+  let liveDrawPending = false;
+  function liveDraw() {
+    if (liveDrawPending) return; liveDrawPending = true;
+    requestAnimationFrame(() => {
+      liveDrawPending = false;
+      const line = LV.cur; if (!line) return;
+      const stE = nearBottom(sEn), stD = nearBottom(sDa);
+      line.da = line.daText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+      line.en = line.enText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+      for (const [box, lang] of [[sEn, 'en'], [sDa, 'da']]) {
+        const old = box.querySelector(`.line[data-lid="${line.id}"]`), nu = renderLine(line, lang);
+        if (lang === 'en' && !line.en.length && line.da.length) { nu.appendChild(document.createTextNode('…')); }
+        old ? old.replaceWith(nu) : box.appendChild(nu);
+      }
+      stickBottom(sEn, stE); stickBottom(sDa, stD);
+    });
+  }
+  function liveAdd(kind, text) {
+    if (!text) return;
+    const now = Date.now();
+    // a new utterance after a pause starts a new line
+    if (LV.cur && now - LV.lastText > 1600 && (LV.cur.daText || LV.cur.enText)) liveFinish();
+    const line = LV.cur || liveStartLine();
+    if (kind === 'da') line.daText += text; else line.enText += text;
+    LV.lastText = now; lastHit = now;
+    liveDraw();
+    // keep lines subtitle-sized: close after a finished sentence once it's long enough
+    if (kind === 'en' && /[.?!…]\s*$/.test(line.enText) && line.enText.length > 70) liveFinish();
+  }
+  function liveFinish() {
+    const line = LV.cur; if (!line) return;
+    LV.cur = null; line.live = false;
+    if (!line.daText.trim() && !line.enText.trim()) { document.querySelectorAll(`.line[data-lid="${line.id}"]`).forEach(e => e.remove()); conv.splice(conv.indexOf(line), 1); return; }
+    line.da = line.daText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    line.en = line.enText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    countSeen(line);
+    shown.push({ seq: 1e12, text: line.daText }); if (shown.length > 50) shown.shift();
+    cultureCheck(line);                     // Danish moments still work
+    onNewSubtitle();                        // study pause: the line has just finished
+  }
+  // close the line when the speaker pauses
+  setInterval(() => { if (LV.cur && Date.now() - LV.lastText > 1600) liveFinish(); }, 300);
+
+  // --- microphone → 16 kHz 16-bit PCM in 100 ms chunks ---
+  const WORKLET = `class P extends AudioWorkletProcessor {
+    constructor(o) { super(); this.r = (o.processorOptions.rate || sampleRate) / 16000; this.pos = 0; this.buf = new Int16Array(1600); this.i = 0; this.peak = 0; }
+    process(inputs) {
+      const ch = inputs[0] && inputs[0][0]; if (!ch) return true;
+      for (; this.pos < ch.length; this.pos += this.r) {
+        const s = Math.max(-1, Math.min(1, ch[this.pos | 0])); const a = Math.abs(s); if (a > this.peak) this.peak = a;
+        this.buf[this.i++] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        if (this.i === 1600) { this.port.postMessage({ pcm: this.buf.buffer, peak: this.peak }, [this.buf.buffer]); this.buf = new Int16Array(1600); this.i = 0; this.peak = 0; }
+      }
+      this.pos -= ch.length; return true;
+    }
+  } registerProcessor('pcm16', P);`;
+  async function startMic(onChunk) {
+    LV.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    let ctx; try { ctx = new AudioContext({ sampleRate: 16000 }); } catch (e) { ctx = new AudioContext(); }
+    LV.ctx = ctx;
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    const src = ctx.createMediaStreamSource(LV.stream);
+    const node = new AudioWorkletNode(ctx, 'pcm16', { processorOptions: { rate: ctx.sampleRate } });
+    node.port.onmessage = e => { LV.level = e.data.peak; onChunk(e.data.pcm); };
+    src.connect(node);                      // not connected to the speakers: no echo
+    LV.node = node; if (ctx.state === 'suspended') await ctx.resume();
+  }
+  function b64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+  const listening = () => live && !document.hidden && !(tvControlled() && !TV.playing);
+
+  // --- Gemini Live Translate over one WebSocket ---
+  function geminiConnect() {
+    const ws = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(S.gkey)}`);
+    const prev = LV.ws; LV.ws = ws; LV.ready = false;
+    ws.onopen = () => ws.send(JSON.stringify({ setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: {
+      responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {},
+      translationConfig: { targetLanguageCode: 'en', echoTargetLanguage: false } } } }));
+    ws.onmessage = async ev => {
+      let m; try { m = JSON.parse(typeof ev.data === 'string' ? ev.data : await ev.data.text()); } catch (e) { return; }
+      if (m.setupComplete) { LV.ready = true; setStatus('🎧 Listening…'); if (prev && prev !== ws) try { prev.close(); } catch (e) {} return; }
+      if (m.goAway) { geminiConnect(); return; }                 // session ending soon: open a fresh one, no gap
+      const sc = m.serverContent; if (!sc) return;
+      if (sc.inputTranscription && sc.inputTranscription.text) liveAdd('da', sc.inputTranscription.text);
+      if (sc.outputTranscription && sc.outputTranscription.text) liveAdd('en', sc.outputTranscription.text);
+      if (sc.turnComplete && LV.cur && LV.cur.enText) liveFinish();
+    };
+    ws.onerror = () => {};
+    ws.onclose = ev => {
+      if (LV.ws !== ws) return;                                   // an old session we replaced on purpose
+      LV.ready = false;
+      if (ev.code === 1008 || /key|permission|denied/i.test(ev.reason || '')) { setStatus('Gemini key rejected: ' + (ev.reason || 'check the key in ⚙')); return; }
+      if (LV.on) { setStatus('Reconnecting…'); setTimeout(() => { if (LV.on && LV.ws === ws) geminiConnect(); }, 400); }
+    };
+  }
+  async function startLive() {
+    LV.on = true;
+    if (S.engine === 'live') {
+      geminiConnect();
+      await startMic(pcm => {
+        if (!listening() || !LV.ready || !LV.ws || LV.ws.readyState !== 1) return;
+        LV.ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(pcm), mimeType: 'audio/pcm;rate=16000' } } }));
+        LV.secs += 0.1;
+      });
+      setInterval(() => { if (LV.secs >= 5) { addCost(LV.secs / 60 * LIVE_PRICE_PER_MIN); LV.secs = 0; } }, 1000);
+    } else startFreeLive();
+    // show that it hears something
+    setInterval(() => { $('dot').classList.toggle('busy', LV.level > 0.04 && listening()); }, 150);
+  }
+
+  // --- free live: the phone's own Danish speech recognition + Google Translate ---
+  function startFreeLive() {
+    if (!SR) { setStatus('This browser has no speech recognition. Use Chrome, or the Gemini live mode.'); return; }
+    const rec = new SR(); LV.rec = rec; rec.lang = 'da-DK'; rec.continuous = true; rec.interimResults = true;
+    let base = '';
+    rec.onresult = e => {
+      if (!listening()) return;
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) { freeFinal(t); } else interim += t;
+      }
+      if (interim) {
+        const line = LV.cur || liveStartLine();
+        line.daText = interim; LV.lastText = Date.now(); lastHit = Date.now(); liveDraw();
+        // translate the words heard so far: right away if it's been 0.6 s, otherwise at the next pause
+        clearTimeout(LV.trTimer);
+        if (Date.now() - (LV.lastTr || 0) > 600) { LV.lastTr = Date.now(); freeTranslate(line); }
+        else LV.trTimer = setTimeout(() => { LV.lastTr = Date.now(); freeTranslate(line); }, 300);
+      }
+    };
+    rec.onerror = e => { if (e.error === 'not-allowed') setStatus('Microphone blocked: allow it for this site.'); };
+    rec.onend = () => { if (LV.on) setTimeout(() => { try { rec.start(); } catch (e) {} }, 150); };
+    try { rec.start(); setStatus('🎧 Listening…'); } catch (e) {}
+    // level meter for the dot
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(st => { const c = new AudioContext(), a = c.createAnalyser(); c.createMediaStreamSource(st).connect(a); const d = new Uint8Array(256);
+      setInterval(() => { a.getByteTimeDomainData(d); let p = 0; for (const v of d) p = Math.max(p, Math.abs(v - 128) / 128); LV.level = p; }, 150); }).catch(() => {});
+  }
+  async function freeTranslate(line) {
+    const my = ++LV.trSeq, text = line.daText.trim(); if (!text) return;
+    try { const en = await googleTranslate(text); if (my === LV.trSeq || !line.live) { line.enText = en; if (LV.cur === line) liveDraw(); else redrawLine(line); } } catch (e) {}
+  }
+  async function freeFinal(t) {
+    const line = LV.cur || liveStartLine();
+    line.daText = t; liveDraw(); clearTimeout(LV.trTimer); LV.trSeq++;
+    LV.cur = null;                                       // next words start a new line
+    try { line.enText = await googleTranslate(t); } catch (e) {}
+    LV.cur = line; liveDraw(); await new Promise(r => requestAnimationFrame(r)); LV.cur = null;
+    LV.cur = line; liveFinish();
+  }
+  function redrawLine(line) {
+    line.da = line.daText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    line.en = line.enText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    for (const [box, lang] of [[sEn, 'en'], [sDa, 'da']]) { const old = box.querySelector(`.line[data-lid="${line.id}"]`); if (old) { const nu = renderLine(line, lang); nu.classList.toggle('cur', old.classList.contains('cur')); old.replaceWith(nu); } }
+  }
+
   // ---------- start ----------
   const KEYHELP = {
     claude: ['Paste your Anthropic API key (sk-ant-...)', 'Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. About $1 per hour of TV. It stays on this phone only.'],
     gemini: ['Paste your Gemini API key', 'Get one free at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. The free tier is slower (a few looks per minute). It stays on this phone only.'],
-    free: ['', 'No key needed. Less accurate than the AI engines, and no speaker tags.']
+    free: ['', 'No key needed. Less accurate than the AI engines, and no speaker tags.'],
+    live: ['Paste your Gemini API key', 'Listens to the TV and translates speech <b>while it is being spoken</b>. Get a key at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. About $2 per hour of TV. No camera needed: just put the phone near the TV.'],
+    livefree: ['', 'Free. Listens to the TV with the phone\'s own Danish speech recognition and translates with Google. Less accurate than Gemini Live, works best in Chrome.']
   };
   function startScreenEngine() {
     const e = $('engStart').value;
-    $('key').style.display = e === 'free' ? 'none' : '';
+    $('key').style.display = (e === 'free' || e === 'livefree') ? 'none' : '';
     $('key').placeholder = KEYHELP[e][0];
-    $('key').value = e === 'gemini' ? (S.gkey || '') : e === 'claude' ? (S.key || '') : '';
+    $('key').value = (e === 'gemini' || e === 'live') ? (S.gkey || '') : e === 'claude' ? (S.key || '') : '';
     $('keyhelp').innerHTML = KEYHELP[e][1];
   }
   $('engStart').value = S.engine; startScreenEngine();
@@ -1914,14 +2094,19 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     const err = $('err'); err.textContent = '';
     const eng = $('engStart').value, k = $('key').value.trim();
     if (eng === 'claude' && !k.startsWith('sk-ant-')) { err.textContent = 'Paste your Anthropic API key first (it starts with sk-ant-).'; return; }
-    if (eng === 'gemini' && k.length < 20) { err.textContent = 'Paste your Gemini API key first.'; return; }
+    if ((eng === 'gemini' || eng === 'live') && k.length < 20) { err.textContent = 'Paste your Gemini API key first.'; return; }
     S.engine = eng; store.set('engine', eng); showEngine();
     if (eng === 'claude') { S.key = k; store.set('key', k); $('keyC').value = k; }
-    if (eng === 'gemini') { S.gkey = k; store.set('gkey', k); $('keyG').value = k; }
+    if (eng === 'gemini' || eng === 'live') { S.gkey = k; store.set('gkey', k); $('keyG').value = k; }
     if (!window.isSecureContext || !navigator.mediaDevices) {
       err.textContent = 'The camera only works from an https:// link opened in Safari or Chrome.'; return;
     }
     $('go').disabled = true; $('go').textContent = 'Starting…';
+    if (isLive()) {
+      try { await startLive(); }
+      catch (e) { err.textContent = 'Microphone blocked (' + (e.name || e.message) + '). Allow the microphone for this site, then reload.'; $('go').disabled = false; $('go').textContent = 'Start'; return; }
+      $('start').style.display = 'none'; keepAwake(); sessionStart = Date.now(); return;
+    }
     try { await startCamera(); }
     catch (e) {
       err.textContent = 'Camera blocked (' + (e.name || e.message) + '). Allow camera for this site in your browser settings, then reload.';
