@@ -66,6 +66,16 @@
   .bubble { position: fixed; z-index: 55; transform: translate(-50%, 0); background: #ffd400; color: #000; font-weight: 600;
     font-size: 15px; padding: 5px 10px; border-radius: 10px; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); max-width: 80vw; }
   .jump { position: fixed; z-index: 56; left: 50%; transform: translateX(-50%); background: #ffd400; color: #000; border: 0; border-radius: 16px; padding: 7px 14px; font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  #quick { position: fixed; left: 0; right: 0; z-index: 12; display: flex; gap: 6px; justify-content: center; pointer-events: none; }
+  #quick button { pointer-events: auto; background: rgba(20,20,20,0.75); backdrop-filter: blur(4px); }
+  #quick button.on { background: #ffd400; color: #000; }
+  #card { position: fixed; left: 12px; right: 12px; z-index: 57; background: #161616; border: 1px solid #ffd400; border-radius: 16px;
+    padding: 14px 16px; display: none; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,.6); -webkit-user-select: text; user-select: text; }
+  #card .ct { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  #card .cl { font-size: 12px; color: #999; margin-top: 10px; }
+  #card .cv { font-size: 16px; line-height: 1.35; margin-top: 4px; }
+  #card .row button { font-size: 14px; padding: 10px; }
+  .mm { margin-left: 6px; color: #ffb36b; font-size: 0.8em; cursor: pointer; }
   .empty { color: #777; font-size: 15px; font-weight: 400; padding-top: 4px; }
 
   .toast { position: fixed; z-index: 60; font-size: 12px; font-weight: 600; background: rgba(255,212,0,0.95); color: #000;
@@ -149,6 +159,10 @@
   <div class="grip" id="gDaB"></div>
 </div>
 <div id="zoomtip"></div>
+<div id="quick">
+  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button>
+</div>
+<div id="card"></div>
 
 <!-- Word bank -->
 <div class="overlay" id="bank">
@@ -305,7 +319,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   const saveBank = () => store.set('bank', bank);
@@ -337,6 +351,7 @@
     document.body.classList.toggle('gapTop', S.mode === 'gapTop');
     document.body.classList.toggle('gapBottom', S.mode === 'gapBottom');
     $('zoomtip').style.top = ((gapTop + gapBottom) / 2) + 'px';
+    $('quick').style.top = (gapBottom - gapTop > 110 ? gapBottom - 50 : gapTop + 6) + 'px';
   }
 
   // One handler per grip. Each returns the new state from the drag distance (fraction of screen).
@@ -485,13 +500,16 @@
     sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
     sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
     sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    const added = [];
     for (const l of lines) {
       const line = { id: ++lineId, spk: l.spk, da: l.da, en: l.en, t: Date.now() };
       conv.push(line);
       sEn.appendChild(renderLine(line, 'en'));
       sDa.appendChild(renderLine(line, 'da'));
       countSeen(line);
+      added.push(line);
     }
+    afterLines(added);
     while (conv.length > 600) {
       const old = conv.shift();
       sEn.querySelectorAll(`.line[data-lid="${old.id}"]`).forEach(e => e.remove());
@@ -503,6 +521,8 @@
   // ---------- tap = highlight, double-tap = save ----------
   let lastTap = { el: null, t: 0 };
   function onTap(e) {
+    const mm = e.target.closest('.mm');
+    if (mm) { const line = conv.find(l => String(l.id) === mm.dataset.lid); if (line && line.spoken) showSpoken(line); return; }
     const el = e.target.closest('.w'); if (!el) { clearHL(); return; }
     const now = Date.now();
     if (lastTap.el === el && now - lastTap.t < 380) { saveWord(el); lastTap = { el: null, t: 0 }; return; }
@@ -627,7 +647,7 @@
       meta.textContent = `heard ${b.seen || 0}× · quiz ${b.right || 0}/${(b.right || 0) + (b.wrong || 0)}` + (mastered(b) ? ' · mastered' : '');
       const bar = document.createElement('div'); bar.className = 'bar';
       const fill = document.createElement('i'); fill.style.width = (a === null ? 0 : Math.round(a * 100)) + '%'; bar.appendChild(fill);
-      const ctx = document.createElement('div'); ctx.className = 'ctx'; ctx.textContent = `"${b.ctxDa}" → "${b.ctxEn}"`;
+      const ctx = document.createElement('div'); ctx.className = 'ctx'; ctx.textContent = `"${b.ctxDa}" → "${b.ctxEn}"` + (b.note ? `\n💡 ${b.note}` : ''); ctx.style.whiteSpace = 'pre-line';
       main.append(da, en, meta, bar, ctx);
       main.onclick = () => row.classList.toggle('open');
       const del = document.createElement('button'); del.className = 'del'; del.textContent = '×';
@@ -965,6 +985,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function costOf(u, engine) {
     if (!u) return 0;
     if (engine === 'gemini' && S.gfree) return 0;
+    if (engine === 'claude-haiku') { const q = PRICES['claude-haiku-5-5']; return ((u.input_tokens || 0) * q[0] + (u.output_tokens || 0) * q[1]) / 1e6; }
     const p = engine === 'gemini' ? (GPRICES[S.gmodel] || GPRICES['gemini-2.5-flash']) : (PRICES[S.model] || PRICES['claude-haiku-5-5']);
     const inTok = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1;
     return (inTok * p[0] + (u.output_tokens || 0) * p[1]) / 1e6;
@@ -1271,6 +1292,193 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     clearTimeout(jumpTimer); jumpTimer = setTimeout(() => { if (jumpChip) { jumpChip.remove(); jumpChip = null; } }, 3500);
   }
   tvUI();
+
+  // ---------- quick buttons on the main screen ----------
+  const SIZES = [['S', 20, 16], ['M', 26, 20], ['L', 32, 24], ['XL', 40, 30]];
+  function quickUI() {
+    $('qSpk').classList.toggle('on', S.showSpk);
+    const i = SIZES.findIndex(z => z[1] === S.fsEn);
+    $('qText').textContent = 'Aa ' + (i >= 0 ? SIZES[i][0] : '');
+    $('qHear').classList.toggle('on', S.hear);
+    $('qCult').classList.toggle('on', S.cult !== 'off');
+    $('qCult').textContent = { off: '🇩🇰 Off', notes: '🇩🇰 Notes', pause: '🇩🇰 Auto-pause' }[S.cult];
+  }
+  function quickToast(text) {
+    const r = $('quick').getBoundingClientRect(), t = document.createElement('div');
+    t.className = 'toast'; t.textContent = text; t.style.left = (r.left + r.width / 2) + 'px'; t.style.top = (r.top - 4) + 'px';
+    document.body.appendChild(t); setTimeout(() => t.remove(), 1300);
+  }
+  $('qSpk').onclick = () => { S.showSpk = !S.showSpk; store.set('showSpk', S.showSpk); $('showspk').checked = S.showSpk; applySpk(); quickUI(); quickToast(S.showSpk ? 'Speakers on' : 'Speakers off'); };
+  $('qText').onclick = () => {
+    const i = SIZES.findIndex(z => z[1] === S.fsEn), n = SIZES[(i + 1) % SIZES.length];
+    S.fsEn = n[1]; S.fsDa = n[2]; store.set('fsEn', S.fsEn); store.set('fsDa', S.fsDa); applyFonts(); quickUI();
+  };
+  $('qHear').onclick = () => { S.hear = !S.hear; store.set('hear', S.hear); S.hear ? startHearing() : stopHearing(); quickUI(); };
+  $('qCult').onclick = () => {
+    S.cult = { off: 'notes', notes: 'pause', pause: 'off' }[S.cult]; store.set('cult', S.cult); quickUI();
+    quickToast({ off: 'Danish moments off', notes: 'Notes only, no pausing', pause: 'Will pause the TV on Danish moments' }[S.cult]);
+  };
+
+  // ---------- pop-up card (culture notes, spoken-vs-subtitle) ----------
+  function showCard(html, buttons) {
+    const c = $('card'); c.innerHTML = html;
+    const row = document.createElement('div'); row.className = 'row'; row.style.marginTop = '12px';
+    for (const [label, fn, primary] of buttons) {
+      const b = document.createElement('button'); b.className = 'big' + (primary ? ' on' : ''); b.textContent = label;
+      b.onclick = () => { c.style.display = 'none'; fn && fn(); }; row.appendChild(b);
+    }
+    c.appendChild(row);
+    c.style.top = (gapTop + 8) + 'px'; c.style.maxHeight = Math.max(160, gapBottom - gapTop - 16) + 'px';
+    c.style.display = 'block';
+  }
+  const esc = t => String(t || '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const lineText = (line, lang) => (lang === 'en' ? line.en : line.da).map(t => t[0]).join(' ');
+
+  // ---------- 🎤 spoken vs subtitle ----------
+  // Free Danish speech recognition in the browser. Each subtitle is compared with what was heard around the same time.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null; const heard = [];
+  function startHearing() {
+    if (!SR) { S.hear = false; store.set('hear', false); quickUI(); quickToast('This browser can\'t listen (try Chrome)'); return; }
+    if (rec) return;
+    rec = new SR(); rec.lang = 'da-DK'; rec.continuous = true; rec.interimResults = false;
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++)
+        if (e.results[i].isFinal) { heard.push({ t: Date.now(), text: e.results[i][0].transcript }); if (heard.length > 200) heard.shift(); }
+    };
+    rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { S.hear = false; store.set('hear', false); quickUI(); setStatus('Microphone blocked: allow it for this site to use 🎤'); } };
+    rec.onend = () => { if (S.hear && rec) setTimeout(() => { try { rec.start(); } catch (e) {} }, 250); };
+    try { rec.start(); quickToast('Listening to the TV'); } catch (e) {}
+  }
+  function stopHearing() { const r = rec; rec = null; try { r && r.stop(); } catch (e) {} }
+  function checkSpoken(line) {
+    if (!S.hear) return;
+    const said = heard.filter(h => h.t >= line.t - 3000 && h.t <= line.t + 5500).map(h => h.text).join(' ');
+    const sw = norm(said).split(' ').filter(Boolean), tw = norm(lineText(line, 'da')).split(' ').filter(Boolean);
+    if (sw.length < 4 || tw.length < 2) return;
+    const heardSet = new Set(sw);
+    const coverage = tw.filter(w => heardSet.has(w)).length / tw.length;
+    if (coverage >= 0.4) return;
+    line.spoken = said;
+    document.querySelectorAll(`.line[data-lid="${line.id}"]`).forEach(div => {
+      if (div.querySelector('.mm')) return;
+      const m = document.createElement('span'); m.className = 'mm'; m.textContent = '⚠'; m.dataset.lid = line.id; div.appendChild(m);
+    });
+    quickToast('🎤 Spoken words differ from the subtitle');
+  }
+  async function showSpoken(line) {
+    let en = ''; try { en = await googleTranslate(line.spoken); } catch (e) {}
+    showCard(`<div class="ct">🎤 Said differently than the subtitle</div>
+      <div class="cl">Subtitle</div><div class="cv">${esc(lineText(line, 'da'))}</div>
+      <div class="cl">Heard (may contain hearing errors)</div><div class="cv">${esc(line.spoken)}</div>
+      ${en ? `<div class="cl">Heard, in English</div><div class="cv">${esc(en)}</div>` : ''}`, [['Close']]);
+  }
+
+  // ---------- 🇩🇰 Danish moments: cheap local score first, tiny AI check only for high scores ----------
+  const COMMON = new Set(('og i jeg det at en den til er som på de med han af for ikke der var dig har så du hun nu over da fra kan mig man ham hvad vil skal være sig hvis meget ud eller have op sin blev jo sine ind efter bare også ja nej nå ej okay hvor hvorfor hvordan når hvem noget nogen alle alt min mit mine din dit dine vores jeres deres hans hendes vi os jer dem her hen ned igen godt god gode stor store lille små ny nye gammel lidt mere mest først sidste dag dage år tid gang gange ting mand kvinde barn børn mor far bror søster ven venner hjem hus vej bil penge arbejde skole kom komme kommer kommet går gik gået gøre gør gjorde gjort sige siger sagde sagt se ser så set tage tager tog taget give giver gav givet få får fik fået vide ved vidste tro tror troede tænke tænker tænkte synes syntes lave laver lavede finde finder fandt sidde sidder sad stå står stod ligge ligger lå spise spiser drikke drikker sove sover elske elsker hader hjælpe hjælper ville kunne skulle måtte burde må bør har havde haft er var været bliver blevet tak undskyld hej farvel godmorgen godnat altså lige stadig allerede aldrig altid måske sikkert virkelig rigtig rigtigt helt meget mange få hele andre anden andet samme selv sammen alene uden imod mellem under bag foran omkring gennem hos mod rundt tilbage videre væk hjemme ude inde oppe nede fordi men hvis selvom mens indtil før siden derfor så om hvordan hvornår hvorfor hvilken hvilke dette disse sådan sådanne her der derovre heller enten både kun næsten ellers nemlig egentlig faktisk vel nok da skam sgu fandme dem den det denne mere mindre bedre bedst værre værst klar fint fin dejlig sjovt sjov træt sur glad ked bange vred syg rask sulten tørstig kold varm ok nul en to tre fire fem seks syv otte ni ti hundrede tusind kr klokken nat morgen aften middag eftermiddag weekend mandag tirsdag onsdag torsdag fredag lørdag søndag vand kaffe te mad brød øl vin telefon tv film bog fest job chef politi læge hospital by land verden menneske mennesker liv død kærlighed problem spørgsmål svar idé grund måde sted plads del slut start hej sig sige bare ting').split(' '));
+  const CULTURE = ['hygge','hyggelig','hyggeligt','janteloven','julefrokost','frikadeller','smørrebrød','rødgrød','fløde','flæskesteg','risalamande','æbleskiver','fastelavn','sankt hans','kolonihave','rundstykke','rugbrød','pålægschokolade','snaps','tivoli','dsb','folketinget','dronningen','kongen','kongehuset','christiansborg','roskilde','jyde','jyder','jylland','københavner','fynbo','bornholm','skagen','brøndby','fck','landsholdet','danmark','dansker','danskere','velfærd','sygedagpenge','efterløn','su','gymnasiet','studenterhue','lagkage','wienerbrød','pølsevogn','ristet hot dog','cykel','cykelsti','christiania','lur','gløgg','juleaften','nisse','pebernødder','klejner','mormor','morfar','farmor','farfar','udkantsdanmark','storkøbenhavn','nørrebro','vesterbro','amager','valby','hellerup'];
+  const IDIOMS = ['ingen ko på isen','op på den høje hest','tage pis på','gå som katten om den varme grød','kaste håndklædet i ringen','nu går den ikke længere','det er ikke min kop te','smøre tykt på','have en høne at plukke','skide på','være på herrens mark','lægge låg på','slå to fluer med et smæk','stikke en finger i jorden','det er ikke raketvidenskab','ud at skide','helt ude i skoven','have is i maven','gå over åen efter vand','komme som en tyv om natten','lukke munden','holde kæft','få kolde fødder','tale med to tunger','have en finger med i spillet','koste skjorten','det var pokkers','så er den ged barberet','klap lige hesten','spil ikke smart','kan du så lige','det kan du godt glemme'];
+  const SLANG = ['sgu','fandme','fandeme','pis','lort','satan','for helvede','kraftedeme','hold kæft','skide','fucking','nederen','fedt','vildt','mega','sindssygt','skrid','kæft','røv','røvhul','fjols','tosse','idiot','spasser','pjat','vrøvl','nå','øhm','ups'];
+  const PARTICLES = new Set(['jo','da','nu','vel','nok','sgu','altså','lige','bare','skam','nemlig','egentlig','faktisk','ikke','så','men','og','også']);
+  S.cultTh = store.get('cultTh', 3);
+  function cultureScore(line) {
+    const words = line.da.map(t => clean(t[0])).filter(Boolean), low = words.map(w => w.toLowerCase());
+    const text = ' ' + low.join(' ') + ' ';
+    if (words.length < 2) return { score: 0, why: [] };
+    let score = 0; const why = [];
+    for (const k of IDIOMS) if (text.includes(' ' + k + ' ') || text.includes(' ' + k)) { score += 3; why.push('idiom'); break; }
+    let c = 0; for (const k of CULTURE) if (text.includes(' ' + k + ' ') || text.includes(' ' + k)) c++;
+    if (c) { score += Math.min(4, 2 * c); why.push('culture word'); }
+    let sl = 0; for (const k of SLANG) if (text.includes(' ' + k + ' ')) sl++;
+    if (sl) { score += Math.min(2, sl); why.push('slang'); }
+    // words the AI could not match one-to-one = the English had to be rephrased (idioms, wordplay)
+    const content = line.da.filter(t => !PARTICLES.has(clean(t[0]).toLowerCase()) && /\p{L}/u.test(t[0]));
+    const anyLinks = line.da.some(t => t[1]);
+    if (anyLinks && content.length >= 3) {
+      const un = content.filter(t => !t[1]).length / content.length;
+      if (un >= 0.4) { score += 3 * un; why.push('rephrased in English'); }
+    }
+    const names = words.slice(1).filter(w => /^\p{Lu}/u.test(w) && w !== 'Jeg' && w.length > 2).length;
+    if (names) { score += Math.min(2, 0.8 * names); why.push('name or place'); }
+    const rare = low.filter(w => w.length >= 5 && !COMMON.has(w) && !bank[w]).length;
+    score += Math.min(1.2, 0.4 * rare);
+    const ratio = line.en.length / Math.max(1, line.da.length);
+    if (ratio > 1.8 || ratio < 0.55) { score += 0.6; why.push('very different length in English'); }
+    if (/!|\?!|haha|griner|ler\)/i.test(text)) score += 0.4;
+    return { score, why };
+  }
+  let lastCultAsk = 0, lastCultPause = 0;
+  const CULT_SYS = `You help an English speaker who is learning Danish while watching Danish TV. Given one Danish subtitle line and the lines before it, decide whether it contains something a foreigner would likely miss: an idiom, wordplay, a joke that depends on Danish language or culture, a cultural or historical reference, a famous person/place/brand, or strong slang. Be strict: ordinary dialogue is NOT notable.
+Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference|slang","title":"3-6 words","why":"1-2 short sentences a foreigner would understand","literal":"word-for-word literal English (only if it differs from the meaning)"}`;
+  async function askCulture(line) {
+    const prev = conv.slice(-5, -1).map(l => lineText(l, 'da')).join(' / ');
+    const user = `Earlier lines: ${prev || '(none)'}\nLine: ${lineText(line, 'da')}\nCurrent English subtitle shown: ${lineText(line, 'en')}`;
+    let t = '', cost = 0;
+    if (S.engine === 'gemini' && S.gkey) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${S.gmodel}:generateContent?key=${encodeURIComponent(S.gkey)}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: CULT_SYS }] }, contents: [{ role: 'user', parts: [{ text: user }] }],
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 250, thinkingConfig: { thinkingBudget: 0 } } }) });
+      if (!r.ok) return null;
+      const j = await r.json(); const u = j.usageMetadata || {};
+      cost = costOf({ input_tokens: u.promptTokenCount || 0, output_tokens: u.candidatesTokenCount || 0 }, 'gemini');
+      const c = ((j.candidates || [])[0] || {}).content; t = c && c.parts ? c.parts.map(p => p.text || '').join('') : '';
+    } else if (S.key) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 250, system: CULT_SYS, messages: [{ role: 'user', content: user }] }) });
+      if (!r.ok) return null;
+      const j = await r.json(); cost = costOf(j.usage, 'claude-haiku');
+      t = (j.content || []).map(c => c.text || '').join('');
+    } else return { notable: true, title: 'Possible Danish moment', why: 'This line scored high on the phone\'s own check (no AI key set, so this is a guess).', type: 'guess' };
+    addCost(cost);
+    const m = t.match(/\{[\s\S]*\}/); if (!m) return null;
+    try { return JSON.parse(m[0]); } catch (e) { return null; }
+  }
+  async function cultureCheck(line) {
+    if (S.cult === 'off') return;
+    const { score, why } = cultureScore(line);
+    line.cultScore = score;
+    if (score < S.cultTh || Date.now() - lastCultAsk < 12000) return;
+    lastCultAsk = Date.now();
+    let res = null; try { res = await askCulture(line); } catch (e) {}
+    if (!res || !res.notable) return;
+    let paused = false;
+    if (S.cult === 'pause' && Date.now() - lastCultPause > 60000) {
+      lastCultPause = Date.now();
+      if ((TV.type === 'samsung' || TV.type === 'lg') && TV.ip && TV.playing) { if (await tvPress('PAUSE')) { setPlaying(false); paused = true; } }
+      else { try { navigator.vibrate && navigator.vibrate([60, 80, 60]); } catch (e) {} }
+    }
+    let literal = res.literal || '';
+    if (!literal && res.type === 'guess') {
+      const ws = line.da.map(t => clean(t[0])).filter(Boolean).slice(0, 10);
+      literal = (await Promise.all(ws.map(lookupWord))).join(' ');
+    }
+    const icon = { idiom: '💬', joke: '😄', culture: '🇩🇰', reference: '📌', slang: '🗯️' }[res.type] || '🇩🇰';
+    showCard(`<div class="ct">${icon} ${esc(res.title || 'Danish moment')}</div>
+      <div class="cv" style="font-weight:600">${esc(lineText(line, 'da'))}</div>
+      <div class="cv">${esc(res.why || '')}</div>
+      ${literal ? `<div class="cl">Literally</div><div class="cv">${esc(literal)}</div>` : ''}
+      ${!paused && S.cult === 'pause' ? '<div class="cl">Pause your TV to take it in (connect the TV in ⚙ to pause automatically).</div>' : ''}`,
+      [['Not interesting', () => { S.cultTh = Math.min(6, S.cultTh + 0.3); store.set('cultTh', S.cultTh); if (paused) resume(); }],
+       ['Save', () => { saveNote(line, res); if (paused) resume(); }],
+       [paused ? '▶ Resume' : 'OK', () => { S.cultTh = Math.max(1.8, S.cultTh - 0.1); store.set('cultTh', S.cultTh); if (paused) resume(); }, true]]);
+  }
+  async function resume() { if (await tvPress('PLAY')) setPlaying(true); }
+  function saveNote(line, res) {
+    const da = lineText(line, 'da'), key = norm(da);
+    bank[key] = bank[key] || { da, en: lineText(line, 'en'), ctxDa: da, ctxEn: lineText(line, 'en'), saved: Date.now(), saves: 1, seen: 1, right: 0, wrong: 0 };
+    bank[key].note = (res.title ? res.title + ': ' : '') + (res.why || '');
+    saveBank(); quickToast('+ saved with note');
+  }
+  function afterLines(added) {
+    for (const line of added) {
+      setTimeout(() => checkSpoken(line), 5500);
+      cultureCheck(line);
+    }
+  }
+  quickUI();
+  if (S.hear) document.addEventListener('click', function once() { document.removeEventListener('click', once); startHearing(); });
 
   // ---------- start ----------
   const KEYHELP = {
