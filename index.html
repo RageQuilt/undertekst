@@ -368,9 +368,10 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), rpm: store.get('rpm', 45), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
+  store.del('rpm');   // older versions saved a slowed-down speed here; never again
   const saveBank = () => store.set('bank', bank);
 
   // ---------- layout: draggable panels ----------
@@ -855,7 +856,7 @@
     x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(vw, x1); y1 = Math.min(vh, y1);
     let sw = x1 - x0, sh = y1 - y0;
     if (sw < 40 || sh < 40) { x0 = 0; y0 = 0; sw = vw; sh = vh; }
-    return { x0, y0, sw, sh };
+    return (cropRect.last = { x0, y0, sw, sh });
   }
   function grab() {
     const c = cropRect(); if (!c) return null;
@@ -866,16 +867,29 @@
     return cv.toDataURL('image/jpeg', 0.8).split(',')[1];
   }
   // Same picture, but encoded in the background so the screen never stutters
-  async function grabAsync() {
-    const c = cropRect(); if (!c) return null; window.__lastCrop = c;
+  // Where the subtitles sit in the camera picture (video pixels), as found by a full-picture "locate" look.
+  let subBox = null, emptyReads = 0;
+  function stripRect() {
+    if (!subBox) return null;
+    const c = cropRect(); if (!c) return null;
+    const bh = Math.max(12, subBox.y1 - subBox.y0), vh = video.videoHeight;
+    // full width (lines vary in length), tall enough for two lines above the bottom line
+    const y0 = Math.max(c.y0, subBox.y0 - 1.3 * bh - 0.03 * vh), y1 = Math.min(c.y0 + c.sh, subBox.y1 + 0.6 * bh + 0.03 * vh);
+    if (y1 - y0 < 20) return null;
+    return { x0: c.x0, y0, sw: c.sw, sh: y1 - y0 };
+  }
+  async function grabAsync(mode) {
+    const c = (mode === 'read' && stripRect()) || cropRect(); if (!c) return null; window.__lastCrop = c;
     const { x0, y0, sw, sh } = c;
-    const k = Math.min(1, 1280 / Math.max(sw, sh));
+    const k = Math.min(1, (mode === 'read' ? 1000 : 1280) / Math.max(sw, sh));
     const W = Math.round(sw * k), H = Math.round(sh * k);
-    cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H);
-    if (!cv.toBlob) return cv.toDataURL('image/jpeg', 0.78).split(',')[1];
-    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.78));
+    cv.width = W; cv.height = H; cx.drawImage(video, x0, y0, sw, sh, 0, 0, W, H); window.__lastW = W; window.__lastH = H;
+    const shot = { crop: c, mode: c === cropRect.last ? 'locate' : mode };
+    if (!cv.toBlob) { shot.b64 = cv.toDataURL('image/jpeg', 0.8).split(',')[1]; return shot; }
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
     if (!blob) return null;
-    return await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.onerror = () => r(null); fr.readAsDataURL(blob); });
+    shot.b64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.onerror = () => r(null); fr.readAsDataURL(blob); });
+    return shot.b64 ? shot : null;
   }
 
   // ---------- network with timeout ----------
@@ -897,16 +911,23 @@
 Reply with compact JSON only, no other text:
 {"lines":[{"spk":"W1","da":"Hvor har du været?","en":"Where have you been?","g":"1 2 3 2|1 2 3 2"}],"roster":{"M2":"bald man, grey suit"}}
 "roster": ONLY speakers that are new in this frame, with a 3-6 word visual description; omit it otherwise.
+Also give "box": [left, top, right, bottom] of the subtitle text as fractions (0-1) of the image.
 If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
+  const READ_SYSTEM = `The image is a strip cut from a phone photo of a TV, showing Danish dialogue subtitles (1-2 lines). Read them and translate into natural English.
+Split speakers on leading dashes. "spk": reuse the tag of the person speaking if clear from context (M1, W1...), otherwise "?".
+"g": one group number per space-separated word of "da", "|", one per word of "en"; words that translate each other share a number, 0 = no counterpart.
+Reply with compact JSON only: {"lines":[{"spk":"W1","da":"Hvor har du været?","en":"Where have you been?","g":"1 2 3 2|1 2 3 2"}]}
+If there is no subtitle text, reply exactly: {"lines":[]}`;
 
-  async function askClaude(b64) {
-    const ctx = contextText();
+  async function askClaude(shot) {
+    const b64 = shot.b64, read = shot.mode === 'read';
+    const ctx = read ? readContext() : contextText();
     const r = await fetchT('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: S.model, max_tokens: 450, system: SYSTEM,
+        model: S.model, max_tokens: read ? 250 : 450, system: read ? READ_SYSTEM : SYSTEM,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
           { type: 'text', text: ctx } ] }]
@@ -916,7 +937,9 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
       let msg = r.status + ''; try { const j = await r.json(); msg += ' ' + (j.error && j.error.message || ''); } catch (e) {}
       const err = new Error(msg); err.status = r.status; err.retryAfter = +(r.headers.get('retry-after') || 0); throw err;
     }
+    learnLimits(r.headers);
     const j = await r.json();
+    if (j.usage) tokAvg = tokAvg * 0.7 + (j.usage.input_tokens || 0) * 0.3;
     const cost = costOf(j.usage, 'claude');
     return parseAI((j.content || []).map(c => c.text || '').join(''), cost);
   }
@@ -932,7 +955,7 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   function parseAI(t, cost) {
     const m = (t || '').match(/\{[\s\S]*\}/); if (!m) return { lines: [], cost };
     let o; try { o = JSON.parse(m[0]); } catch (e) { return { lines: [], cost }; }
-    return { lines: toLines(o), cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null };
+    return { lines: toLines(o), cost, roster: o.roster && typeof o.roster === 'object' ? o.roster : null, box: Array.isArray(o.box) && o.box.length === 4 ? o.box.map(Number) : null };
   }
   function toLines(o) {
     const out = [];
@@ -958,13 +981,14 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
   }
 
   // ---------- Google Gemini ----------
-  async function askGemini(b64) {
+  async function askGemini(shot) {
+    const b64 = shot.b64, read = shot.mode === 'read';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${S.gmodel}:generateContent?key=${encodeURIComponent(S.gkey)}`;
     const r = await fetchT(url, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: contextText() }] }],
+        systemInstruction: { parts: [{ text: read ? READ_SYSTEM : SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: read ? readContext() : contextText() }] }],
         generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 450, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
       })
     });
@@ -1091,10 +1115,26 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return { lines, cost: 0 };
   }
 
-  function ask(b64) {
-    if (S.engine === 'gemini') return askGemini(b64);
+  function ask(shot) {
+    if (S.engine === 'gemini') return askGemini(shot);
     if (S.engine === 'free') return askFree();
-    return askClaude(b64);
+    return askClaude(shot);
+  }
+  // A full-picture look sees faces, a strip read doesn't: let the full look correct the speaker tag of a line already shown.
+  function fixSpeakers(lines) {
+    for (const l of lines) {
+      if (!l.spk || l.spk === '?') continue;
+      const txt = l.da.map(t => t[0]).join(' ');
+      const hit = conv.slice(-3).find(c => similar(c.da.map(t => t[0]).join(' '), txt));
+      if (hit && hit.spk !== l.spk) {
+        hit.spk = l.spk;
+        document.querySelectorAll(`.line[data-lid="${hit.id}"] .spk`).forEach(t => { t.textContent = l.spk; t.style.background = spkColor(l.spk); });
+      }
+    }
+  }
+  function readContext() {
+    const recent = conv.slice(-2).map(l => `${l.spk || '?'}: ${l.da.map(t => t[0]).join(' ')}`).join('\n');
+    return `Speakers: ${Object.keys(roster).join(', ') || 'none yet'}. Previous lines (context only):\n${recent || '(none)'}`;
   }
 
   // ---------- cost tracking ----------
@@ -1254,13 +1294,23 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     return Math.max(dh, moved, profDiff(a.col, b.col, 6), profDiff(a.row, b.row, 4));
   }
   let prevM = null, sentM = null, lastSendTime = 0, changeSince = 0, lastDone = 0;
-  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0, missStreak = 0, blindUntil = 0, lastBand = null;
+  let ignoreUntil = 0, quietUntil = 0, emptyStreak = 0, missStreak = 0, blindUntil = 0, lastBand = null, lastLocate = 0, tokAvg = 1200;
   const cap = () => S.engine === 'free' ? 1 : 3;
   const dbg = { n: 0, stab: 0, chg: 0, why: '', ms: 0 };
   // Speed governor: never send more looks per minute than the AI account allows, so it never blocks us.
   // New subtitles get priority; "maybe" and safety looks only use spare capacity.
   const bucket = { tokens: 4, last: Date.now() };
-  const rpm = () => S.engine === 'free' ? 600 : (S.engine === 'gemini' && S.gfree ? 9 : S.rpm);
+  const LIM = { rpm: 50, itpm: 50000, slowUntil: 0 };   // defaults for a new account; replaced by the real numbers from each answer
+  function learnLimits(h) {
+    const r = +h.get('anthropic-ratelimit-requests-limit'), t = +h.get('anthropic-ratelimit-input-tokens-limit');
+    if (r > 0) LIM.rpm = r; if (t > 0) LIM.itpm = t;
+  }
+  const rpm = () => {
+    if (S.engine === 'free') return 600;
+    if (S.engine === 'gemini') return S.gfree ? 9 : 120;
+    const byTokens = LIM.itpm / Math.max(200, tokAvg);              // the token cap usually bites first
+    return Math.max(6, Math.min(LIM.rpm, byTokens) * (Date.now() < LIM.slowUntil ? 0.7 : 0.92));
+  };
   function fire(m, why) {
     const now = Date.now();
     bucket.tokens = Math.min(5, bucket.tokens + (now - bucket.last) / 60000 * rpm()); bucket.last = now;
@@ -1294,9 +1344,9 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
         const sx = m.c.sw / m.w, sy = m.c.sh / m.h;
         lastBand = { x0: m.c.x0 + m.bx0 * sx, x1: m.c.x0 + (m.bx1 + 1) * sx, y0: m.c.y0 + m.y0 * sy, y1: m.c.y0 + (m.y1 + 1) * sy, t: now };
       }
-      if (S.diag) $('diag').textContent = (now < blindUntil ? 'TIMER MODE (watcher unsure)  ' : '') + `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)}, bright≥${dbg.brT})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
+      if (S.diag) $('diag').textContent = `mode ${dbg.mode || '-'}  strip ${subBox ? 'yes' : 'no'}  ` + `looks left ${bucket.tokens.toFixed(1)}/min-limit ${rpm()}  quiet ${Math.max(0, (quietUntil - now) / 1000).toFixed(1)}s\ntext px ${m.n} (${(m.tx || 0).toFixed(2)}, bright≥${dbg.brT})  settle ${stab.toFixed(2)}  change ${chg.toFixed(2)}\nwatch ${dbg.ms.toFixed(0)} ms  in flight ${inFlight}  answer ${(avgLatency / 1000).toFixed(1)} s\nlast look: ${dbg.why} ${((now - lastSendTime) / 1000).toFixed(1)} s ago`;
       const hasText = m.n >= MIN_TEXT, hadText = sentM && sentM.n >= MIN_TEXT;
-      const gap = now - lastSendTime, base = Math.max(800, S.iv);
+      const gap = now - lastSendTime, base = Math.max(700, 60000 / rpm());
       // 1. Confident new subtitle: look right now.
       const changedNow = hasText && chg > 0.4 && stab < 0.25;
       if (changedNow && changeSince) { if (fire(m, 'new subtitle')) continue; }   // seen on two frames in a row = real, not grain
@@ -1318,11 +1368,22 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     if (!live || document.hidden || inFlight >= cap() || Date.now() < pauseUntil) return;
     inFlight++; $('dot').classList.add('busy');
     const t0 = Date.now();
-    let b64 = null; try { b64 = await grabAsync(); } catch (e) {}
-    if (!b64) { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); return; }
+    const useStrip = S.engine !== 'free' && subBox && Date.now() - lastLocate < 8000 && emptyReads < 2;
+    let shot = null; try { shot = await grabAsync(useStrip ? 'read' : 'locate'); } catch (e) {}
+    if (!shot) { inFlight--; if (!inFlight) $('dot').classList.remove('busy'); return; }
+    if (shot.mode === 'locate') lastLocate = Date.now();
+    dbg.mode = shot.mode;
     const my = ++seq;
     try {
-      const res = await ask(b64);
+      const res = await ask(shot);
+      if (shot.mode === 'locate') {
+        if (res.box && res.lines.length && res.box[3] > res.box[1]) {
+          const c = shot.crop;
+          subBox = { y0: c.y0 + res.box[1] * c.sh, y1: c.y0 + res.box[3] * c.sh, t: Date.now() }; emptyReads = 0;
+        }
+      } else if (!res.lines.length) { if (++emptyReads >= 2) lastLocate = 0; } else emptyReads = 0;
+      // a full-picture look can see faces: let it fix the speaker tag of the line already on screen
+      if (shot.mode === 'locate' && res.lines.length) fixSpeakers(res.lines);
       avgLatency = avgLatency * 0.8 + (Date.now() - t0) * 0.2; lastDone = Date.now();
       addCost(res.cost || 0);
       backoff = Math.max(1, backoff * 0.9);
@@ -1347,11 +1408,10 @@ If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
     } catch (e) {
       if (e.status === 401 || e.status === 403) { setStatus('API key rejected. Check the key in Settings.'); live = false; $('live').classList.remove('on'); $('live').textContent = 'Paused'; }
       else if (e.status === 429) {
-        // learn the account's real limit so it doesn't happen again
-        if (S.engine === 'claude') { S.rpm = Math.max(10, Math.round(S.rpm * 0.75)); store.set('rpm', S.rpm); }
-        bucket.tokens = 0;
-        pauseUntil = Date.now() + Math.min(5000, 1000 * (e.retryAfter || 3));
-        setStatus(S.engine === 'gemini' && S.gfree ? 'Gemini free-tier limit hit. Set How often to look to 5 s or slower.' : 'Speed limit on your API account. Slowing down automatically (try 1.5 s or slower).');
+        // short breather, then a slightly gentler pace for a minute (nothing saved permanently)
+        LIM.slowUntil = Date.now() + 60000; bucket.tokens = 0;
+        pauseUntil = Date.now() + Math.min(4000, 1000 * (e.retryAfter || 2));
+        setStatus(S.engine === 'gemini' && S.gfree ? 'Gemini free-tier limit hit, slowing a little…' : 'API account limit reached, pausing 2-4 s…');
       }
       else if (e.status === 529 || e.status >= 500) { backoff = Math.min(backoff * 1.5, 5); pauseUntil = Date.now() + 3000; setStatus('Claude is overloaded right now, retrying…'); }
       else if (e.timeout) { setStatus('Slow connection, retrying…'); }
