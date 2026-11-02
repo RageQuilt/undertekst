@@ -209,7 +209,8 @@
   <select id="engine">
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
-    <option value="live">🎧 Live audio: Gemini Live Translate (real-time, best)</option>
+    <option value="instant">⚡ Instant: phone reads subtitles + Google Translate (fastest, free)</option>
+    <option value="live">🎧 Live audio: Gemini Live Translate (listens instead of reading)</option>
     <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
   </select>
@@ -232,6 +233,11 @@
     <div class="note">Free tier costs nothing but only allows a few looks per minute, so set "How often to look" to 5 s or slower. Google may use free-tier data to improve its products.</div>
     <label>Gemini API key</label>
     <input type="password" id="keyG" placeholder="From aistudio.google.com/apikey" style="width:100%" autocomplete="off">
+  </div>
+  <div id="engInstant">
+    <label class="row" style="color:#ccc"><input type="checkbox" id="polish"> AI polish: better English + tap-to-match words (uses your Claude key, ~0.01¢ per line)</label>
+    <label>Claude API key (only for AI polish)</label>
+    <input type="password" id="keyC2" placeholder="sk-ant-... (optional)" style="width:100%" autocomplete="off">
   </div>
   <div id="engFree">
     <div class="note">No key, no cost. The phone reads the subtitles itself and Google Translate translates them. Less accurate than the AI engines and no speaker tags. Tap a Danish word to see its translation.</div>
@@ -345,7 +351,8 @@
   <select id="engStart" style="width:100%;max-width:420px;margin-top:14px">
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
-    <option value="live">🎧 Live audio: Gemini Live Translate (real-time, best)</option>
+    <option value="instant">⚡ Instant: phone reads subtitles + Google Translate (fastest, free)</option>
+    <option value="live">🎧 Live audio: Gemini Live Translate (listens instead of reading)</option>
     <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
   </select>
@@ -369,10 +376,10 @@
   // carry the key over from the previous version
   let oldKey = ''; try { oldKey = JSON.parse(localStorage.getItem('ut2_key') || '""'); } catch (e) {}
   const S = {
-    key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'claude'),
+    key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'instant'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   store.del('rpm');   // older versions saved a slowed-down speed here; never again
@@ -469,7 +476,7 @@
   $('fsEn').oninput = e => { S.fsEn = +e.target.value; store.set('fsEn', S.fsEn); applyFonts(); };
   $('fsDa').oninput = e => { S.fsDa = +e.target.value; store.set('fsDa', S.fsDa); applyFonts(); };
   $('showspk').checked = S.showSpk;
-  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || S.engine === 'live' || S.engine === 'livefree'); };
+  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || ['free', 'live', 'livefree', 'instant'].includes(S.engine)); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
   $('showdiag').checked = S.diag; $('diag').style.display = S.diag ? 'block' : 'none';
@@ -484,11 +491,13 @@
     $('engClaude').style.display = S.engine === 'claude' ? 'block' : 'none';
     $('engGemini').style.display = (S.engine === 'gemini' || S.engine === 'live') ? 'block' : 'none';
     $('engFree').style.display = S.engine === 'free' ? 'block' : 'none';
-    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || isLive());
+    $('engInstant').style.display = S.engine === 'instant' ? 'block' : 'none';
+    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || S.engine === 'instant' || isLive());
   }
   $('engine').onchange = e => {
     S.engine = e.target.value; store.set('engine', S.engine); showEngine();
     if (S.engine === 'free') loadOCR().catch(err => setStatus(err.message));
+    if (S.engine === 'instant' && video.videoWidth) instantLoop();
     if ((S.engine === 'claude' && !S.key) || (S.engine === 'gemini' && !S.gkey)) setStatus('Add your API key below for this engine.');
     lastDaText = ''; updateCost && updateCost();
   };
@@ -496,7 +505,9 @@
   $('gmodel').onchange = e => { S.gmodel = e.target.value; store.set('gmodel', S.gmodel); };
   $('gfree').checked = S.gfree;
   $('gfree').onchange = e => { S.gfree = e.target.checked; store.set('gfree', S.gfree); };
-  $('keyC').value = S.key || ''; $('keyG').value = S.gkey || '';
+  $('keyC').value = S.key || ''; $('keyG').value = S.gkey || ''; $('keyC2').value = S.key || '';
+  $('keyC2').onchange = e => { S.key = e.target.value.trim(); store.set('key', S.key); $('keyC').value = S.key; };
+  $('polish').checked = S.polish; $('polish').onchange = e => { S.polish = e.target.checked; store.set('polish', S.polish); };
   $('keyC').onchange = e => { S.key = e.target.value.trim(); store.set('key', S.key); };
   $('keyG').onchange = e => { S.gkey = e.target.value.trim(); store.set('gkey', S.gkey); };
   showEngine();
@@ -531,7 +542,7 @@
   const clean = w => (w || '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
   const norm = t => (t || '').toLowerCase().replace(/[^a-zæøåéü0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
-  function isPunct(w) { return /^[^\p{L}\p{N}]+$/u.test(w); }
+  function isPunct(w) { return /^[^\p{L}\p{N}\-–]+$/u.test(w); }   // dialogue dashes keep their space
   function renderLine(line, lang) {
     const div = document.createElement('div'); div.className = 'line cur'; div.dataset.lid = line.id;
     if (line.spk) {
@@ -1330,7 +1341,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
   async function watch() {
     for (;;) {
       await new Promise(r => setTimeout(r, inFlight >= cap() ? 200 : 120));
-      if (!live || document.hidden || isLive()) continue;
+      if (!live || document.hidden || isLive() || S.engine === 'instant') continue;
       const now = Date.now();
       if (tvControlled() && !TV.playing) continue;                 // TV paused by the app: nothing new will appear, and the pause screen must not count
       if (now < ignoreUntil) {                                     // TV just resumed or skipped: let Netflix's overlay fade, then take the picture as the new baseline
@@ -1426,7 +1437,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
 
 
   // test hook: lets a page preview run without a camera or API key
-  window.__ut = { LV: () => LV, snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
+  window.__ut = { IN: () => IN, LV: () => LV, snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
 
   // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
   // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
@@ -2068,9 +2079,224 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     LV.cur = line; liveFinish();
   }
   function redrawLine(line) {
-    line.da = line.daText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
-    line.en = line.enText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    if (line.polished && line.polished.da.map(t => t[0]).join(' ') === line.daText.trim().split(/\s+/).join(' ')) { line.da = line.polished.da; line.en = line.polished.en; }
+    else {
+      line.da = line.daText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+      line.en = line.enText.trim().split(/\s+/).filter(Boolean).map(w => [w, 0]);
+    }
     for (const [box, lang] of [[sEn, 'en'], [sDa, 'da']]) { const old = box.querySelector(`.line[data-lid="${line.id}"]`); if (old) { const nu = renderLine(line, lang); nu.classList.toggle('cur', old.classList.contains('cur')); old.replaceWith(nu); } }
+  }
+
+  // ---------- ⚡ on-phone subtitle reader (PaddleOCR PP-OCRv5: text finder + Danish/Latin reader) ----------
+  const PD = { ready: null, det: null, rec: null, dict: null, ort: null };
+  const ORT_CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/';
+  function loadPaddle(base) {
+    if (PD.ready) return PD.ready;
+    base = base || './models/';
+    PD.ready = (async () => {
+      if (!window.ort) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = ORT_CDN + 'ort.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('Could not load the on-phone AI runtime')); document.head.appendChild(sc); });
+      const ort = window.ort; PD.ort = ort;
+      ort.env.wasm.wasmPaths = ORT_CDN; ort.env.wasm.numThreads = 1;
+      const opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
+      const [det, rec, dict] = await Promise.all([
+        ort.InferenceSession.create(base + 'det.onnx', opts),
+        ort.InferenceSession.create(base + 'latin_rec.onnx', opts),
+        fetch(base + 'latin_dict.txt').then(r => r.text())]);
+      PD.det = det; PD.rec = rec;
+      PD.dict = dict.split(/\r?\n/).filter((c, i, a) => !(i === a.length - 1 && c === '')).concat([' ']);
+      return true;
+    })();
+    PD.ready.catch(() => { PD.ready = null; });
+    return PD.ready;
+  }
+  const pcv = document.createElement('canvas'), pcx = pcv.getContext('2d', { willReadFrequently: true });
+  // 1. find text boxes in a region (source: video/canvas, rect in source pixels)
+  async function paddleDetect(src, rect, maxSide) {
+    const sc = Math.min(1, maxSide / Math.max(rect.w, rect.h));
+    const W = Math.max(32, Math.round(rect.w * sc / 32) * 32), H = Math.max(32, Math.round(rect.h * sc / 32) * 32);
+    pcv.width = W; pcv.height = H; pcx.drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, W, H);
+    const d = pcx.getImageData(0, 0, W, H).data, N = W * H, x = new Float32Array(3 * N);
+    const m = [0.485, 0.456, 0.406], s = [0.229, 0.224, 0.225];
+    for (let p = 0, i = 0; p < N; p++, i += 4) {          // BGR order, as the model was trained
+      x[p] = (d[i + 2] / 255 - m[0]) / s[0]; x[N + p] = (d[i + 1] / 255 - m[1]) / s[1]; x[2 * N + p] = (d[i] / 255 - m[2]) / s[2];
+    }
+    const out = await PD.det.run({ [PD.det.inputNames[0]]: new PD.ort.Tensor('float32', x, [1, 3, H, W]) });
+    const prob = out[PD.det.outputNames[0]].data;
+    // connected regions of "text" pixels → boxes
+    const lab = new Int32Array(N), boxes = []; let id = 0; const stack = [];
+    for (let p = 0; p < N; p++) {
+      if (prob[p] < 0.3 || lab[p]) continue;
+      id++; let x0 = W, y0 = H, x1 = 0, y1 = 0, sum = 0, cnt = 0; stack.push(p); lab[p] = id;
+      while (stack.length) {
+        const q = stack.pop(), qx = q % W, qy = (q / W) | 0; sum += prob[q]; cnt++;
+        if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+        for (const r of [q - 1, q + 1, q - W, q + W]) {
+          if (r < 0 || r >= N || lab[r] || prob[r] < 0.3) continue;
+          if ((r === q - 1 && qx === 0) || (r === q + 1 && qx === W - 1)) continue;
+          lab[r] = id; stack.push(r);
+        }
+      }
+      if (cnt < 12 || sum / cnt < 0.55) continue;
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1, dist = (bw * bh * 1.6) / (2 * (bw + bh));   // "unclip": the map is thinner than the letters
+      boxes.push({ x: rect.x + (x0 - dist) / sc * (rect.w / (W / sc)), y: rect.y + (y0 - dist) / sc * (rect.h / (H / sc)),
+                   w: (bw + 2 * dist) / sc * (rect.w / (W / sc)), h: (bh + 2 * dist) / sc * (rect.h / (H / sc)), score: sum / cnt });
+    }
+    return boxes;
+  }
+  // 2. read one text line (source rect) → { text, conf }
+  async function paddleRead(src, b) {
+    const H = 48, W = Math.min(1600, Math.max(16, Math.round(b.w * H / b.h)));
+    pcv.width = W; pcv.height = H; pcx.drawImage(src, b.x, b.y, b.w, b.h, 0, 0, W, H);
+    const d = pcx.getImageData(0, 0, W, H).data, N = W * H, x = new Float32Array(3 * N);
+    for (let p = 0, i = 0; p < N; p++, i += 4) { x[p] = d[i + 2] / 127.5 - 1; x[N + p] = d[i + 1] / 127.5 - 1; x[2 * N + p] = d[i] / 127.5 - 1; }
+    const out = await PD.rec.run({ [PD.rec.inputNames[0]]: new PD.ort.Tensor('float32', x, [1, 3, H, W]) });
+    const t = out[PD.rec.outputNames[0]], [, T, C] = t.dims, pr = t.data;
+    let text = '', last = 0, cs = 0, cn = 0;
+    for (let i = 0; i < T; i++) {
+      let bi = 0, bv = -1; for (let c = 0; c < C; c++) { const v = pr[i * C + c]; if (v > bv) { bv = v; bi = c; } }
+      if (bi !== 0 && bi !== last) { text += PD.dict[bi - 1] || ''; cs += bv; cn++; }
+      last = bi;
+    }
+    return { text: text.trim(), conf: cn ? cs / cn : 0 };
+  }
+  // ---------- ⚡ INSTANT engine: read the subtitle on the phone, translate the text ----------
+  // Subtitles appear with the whole sentence when the actor starts speaking, so reading them on the phone
+  // (≈0.2-0.5 s) and translating just the text (≈0.2 s) puts English on screen while the line is still being said.
+  const IN = { roi: null, roiT: 0, miss: 0, cur: null, curText: '', curConf: 0, lastSeen: 0, ms: 0, reads: 0, loopOn: false };
+  function pickSubtitle(boxes) {
+    const now = Date.now();
+    IN.ignore = (IN.ignore || []).filter(z => now - z.t < 30000);
+    const hit = b => IN.ignore.some(z => b.x < z.x + z.w && b.x + b.w > z.x && b.y < z.y + z.h && b.y + b.h > z.y);
+    const bs = boxes.filter(b => b.h >= 5 && b.w >= 0.9 * b.h && !hit(b));        // short words like "Ja." count; ignored spots (logos) don't
+    if (!bs.length) return null;
+    // merge boxes on the same text line
+    bs.sort((a, b) => (a.y + a.h / 2) - (b.y + b.h / 2));
+    const lines = [];
+    for (const b of bs) {
+      const L = lines.find(l => { const ov = Math.min(l.y + l.h, b.y + b.h) - Math.max(l.y, b.y); return ov > 0.5 * Math.min(l.h, b.h); });
+      if (L) { const x0 = Math.min(L.x, b.x), y0 = Math.min(L.y, b.y), x1 = Math.max(L.x + L.w, b.x + b.w), y1 = Math.max(L.y + L.h, b.y + b.h); Object.assign(L, { x: x0, y: y0, w: x1 - x0, h: y1 - y0, n: L.n + 1 }); }
+      else lines.push({ x: b.x, y: b.y, w: b.w, h: b.h, n: 1 });
+    }
+    // the subtitle = the lowest line, plus the line just above it if it lines up (two-line subtitles)
+    lines.sort((a, b) => (b.y + b.h) - (a.y + a.h));
+    const bottom = lines[0], block = [bottom], cx = bottom.x + bottom.w / 2;
+    for (const l of lines.slice(1)) {
+      const top = block[block.length - 1];
+      const gap = top.y - (l.y + l.h), lcx = l.x + l.w / 2;
+      if (gap < 1.2 * bottom.h && gap > -0.3 * bottom.h && Math.abs(l.h - bottom.h) < 0.6 * bottom.h && Math.abs(lcx - cx) < Math.max(l.w, bottom.w) * 0.6) block.push(l);
+      else break;
+      if (block.length === 3) break;
+    }
+    block.reverse();
+    return { lines: block, y0: block[0].y, y1: bottom.y + bottom.h, lh: bottom.h };
+  }
+  const tidyRead = t => t.replace(/\s+/g, ' ').replace(/^[^\p{L}\d\-–"«]+/u, '').replace(/[^\p{L}\d.?!…,"»)]+$/u, '').trim();
+  function sameSub(a, b) {
+    const na = norm(a).replace(/ /g, ''), nb = norm(b).replace(/ /g, '');
+    if (!na || !nb) return false; if (na === nb) return true;
+    const m = new Map(); for (let i = 0; i < na.length - 1; i++) { const g = na.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
+    let hit = 0; for (let i = 0; i < nb.length - 1; i++) { const g = nb.substr(i, 2), c = m.get(g); if (c) { hit++; m.set(g, c - 1); } }
+    return 2 * hit / Math.max(1, na.length + nb.length - 2) > 0.6;
+  }
+  function instantShow(text, conf) {
+    const now = Date.now();
+    IN.lastSeen = now;
+    if (IN.cur && sameSub(text, IN.curText)) {
+      // same subtitle read again: keep it, but take the better reading
+      if (conf > IN.curConf + 0.04 && norm(text) !== norm(IN.curText)) { IN.curText = text; IN.curConf = conf; instantSetDanish(IN.cur, text, true); }
+      return;
+    }
+    // a NEW subtitle
+    IN.curText = text; IN.curConf = conf;
+    sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
+    sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur')); sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    const line = { id: ++lineId, spk: '', da: [], en: [], daText: '', enText: '', t: now, seq: 1e12 };
+    conv.push(line); IN.cur = line;
+    sEn.appendChild(renderLine(line, 'en')); sDa.appendChild(renderLine(line, 'da'));
+    lastHit = now; setStatus('');
+    instantSetDanish(line, text, false);
+    onNewSubtitle();                 // study pause: the previous line just ended
+  }
+  async function instantSetDanish(line, text, update) {
+    line.daText = text; line.enText = line.enText || '…'; line.my = (line.my || 0) + 1; const my = line.my;
+    redrawLine(line); stickBottom(sEn, true); stickBottom(sDa, true);
+    let en = '';
+    try { en = await googleTranslate(text); } catch (e) { setStatus('Translation problem: ' + e.message); }
+    if (my !== line.my || !en) return;
+    line.enText = en; redrawLine(line);
+    if (!update) { countSeen(line); shown.push({ seq: 1e12, text }); if (shown.length > 50) shown.shift(); cultureCheck(line); }
+    if (S.polish && S.key) aiPolish(line, my);
+  }
+  // optional: a tiny text-only AI request upgrades the English and adds tap-to-match word links
+  const POLISH_SYS = `Translate this Danish TV subtitle into natural, idiomatic English. Then link words: "g" = one group number per space-separated word of the Danish, "|", one per space-separated word of your English; words that translate each other share a number, 0 = no counterpart.
+Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
+  async function aiPolish(line, my) {
+    try {
+      const prev = conv.slice(-3, -1).map(l => l.daText || l.da.map(t => t[0]).join(' ')).join(' / ');
+      const r = await fetchT('https://api.anthropic.com/v1/messages', { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 200, system: POLISH_SYS, messages: [{ role: 'user', content: `Earlier: ${prev || '-'}\nSubtitle: ${line.daText}` }] }) }, 8000);
+      if (!r.ok) return;
+      const j = await r.json(); addCost(costOf(j.usage, 'claude-haiku'));
+      const m = ((j.content || [])[0] || {}).text.match(/\{[\s\S]*\}/); if (!m || my !== line.my) return;
+      const o = JSON.parse(m[0]); if (!o.en) return;
+      const dw = line.daText.split(/\s+/).filter(Boolean), ew = o.en.split(/\s+/).filter(Boolean);
+      const [gd, ge] = String(o.g || '').split('|').map(x => x.trim().split(/\s+/).map(n => parseInt(n, 10) || 0));
+      const ok = gd && ge && gd.length === dw.length && ge.length === ew.length;
+      line.enText = o.en; line.polished = ok ? { da: dw.map((w, i) => [w, gd[i]]), en: ew.map((w, i) => [w, ge[i]]) } : null;
+      redrawLine(line);
+    } catch (e) {}
+  }
+  async function instantLoop() {
+    if (IN.loopOn) return; IN.loopOn = true;
+    setStatus('Loading the on-phone reader (one time, ~13 MB)…');
+    try { await loadPaddle(); } catch (e) { setStatus(e.message); IN.loopOn = false; return; }
+    setStatus('Looking for subtitles…');
+    let lastFull = 0;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 30));
+      if (S.engine !== 'instant') { IN.loopOn = false; return; }
+      const now = Date.now();
+      if (!live || document.hidden || (tvControlled() && !TV.playing) || now < ignoreUntil || !video.videoWidth) { await new Promise(r => setTimeout(r, 200)); continue; }
+      const t0 = performance.now();
+      const c = cropRect(); if (!c) continue;
+      try {
+        const useRoi = IN.roi && now - IN.roiT < 5000 && now - lastFull < 6000;
+        const region = useRoi ? IN.roi : { x: c.x0, y: c.y0, w: c.sw, h: c.sh };
+        if (!useRoi) lastFull = now;
+        const boxes = await paddleDetect(video, region, useRoi ? 800 : 960);
+        const block = pickSubtitle(boxes);
+        if (!block) {
+          IN.roi = null; IN.miss++; if (useRoi) lastFull = 0;                       // strip empty: search the whole picture next
+          if (IN.cur && now - IN.lastSeen > 1200) { IN.cur = null; IN.curText = ''; }   // subtitle gone: a repeat later counts as new
+          if (now - lastHit > 4000) setStatus('Looking… keep the TV in the picture');
+        } else {
+          IN.miss = 0;
+          const pad = 2.4 * block.lh;
+          IN.roi = { x: c.x0, w: c.sw, y: Math.max(c.y0, block.y0 - pad), h: Math.min(c.y0 + c.sh, block.y1 + pad) - Math.max(c.y0, block.y0 - pad) };
+          IN.roiT = now;
+          // same boxes as last time and we already have a confident reading: nothing new to read
+          const geo = block.lines.map(l => [l.x, l.y, l.w, l.h].map(v => Math.round(v / 3)).join(',')).join('|');
+          if (geo === IN.geo && IN.cur && IN.curConf > 0.85 && now - IN.lastSeen < 1500) { IN.lastSeen = now; IN.skips = (IN.skips || 0) + 1; continue; }
+          IN.geo = geo;
+          const reads = [];
+          for (const ln of block.lines) {
+            const b = { x: Math.max(0, ln.x - 0.15 * ln.h), y: Math.max(0, ln.y - 0.12 * ln.h), w: ln.w + 0.3 * ln.h, h: ln.h * 1.24 };
+            const r = await paddleRead(video, b); if (r.text && r.conf > 0.55) reads.push(r);
+          }
+          const text = tidyRead(reads.map(r => r.text).join(' '));
+          const letters = (text.match(/\p{L}/gu) || []).length, lower = (text.match(/\p{Ll}/gu) || []).length;
+          if (letters >= 2 && lower >= 1 && !/subtit|original|undertekst/i.test(text)) instantShow(text, reads.reduce((a, r) => a + r.conf, 0) / reads.length);
+          else if (reads.length || block.lines.length) {
+            // not dialogue (a logo, a channel name, a clock): ignore that spot for a while and look elsewhere
+            for (const l of block.lines) IN.ignore.push({ x: l.x - 4, y: l.y - 4, w: l.w + 8, h: l.h + 8, t: now });
+            IN.roi = null; lastFull = 0;
+          }
+        }
+      } catch (e) { setStatus('Reader problem: ' + (e.message || e)); await new Promise(r => setTimeout(r, 500)); }
+      const ms = performance.now() - t0; IN.ms = IN.ms ? IN.ms * 0.8 + ms * 0.2 : ms; IN.reads++;
+      if (S.diag) $('diag').textContent = `INSTANT  cycle ${IN.ms.toFixed(0)} ms  ${IN.roi ? 'strip' : 'full picture'}  reads ${IN.reads}\ncurrent: ${IN.curText.slice(0, 40)}`;
+    }
   }
 
   // ---------- start ----------
@@ -2079,11 +2305,12 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     gemini: ['Paste your Gemini API key', 'Get one free at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. The free tier is slower (a few looks per minute). It stays on this phone only.'],
     free: ['', 'No key needed. Less accurate than the AI engines, and no speaker tags.'],
     live: ['Paste your Gemini API key', 'Listens to the TV and translates speech <b>while it is being spoken</b>. Get a key at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. About $2 per hour of TV. No camera needed: just put the phone near the TV.'],
+    instant: ['', '<b>Fastest.</b> Your phone reads the subtitles itself (no photos sent anywhere) and translates the text. Free. One-time download of ~13 MB.'],
     livefree: ['', 'Free. Listens to the TV with the phone\'s own Danish speech recognition and translates with Google. Less accurate than Gemini Live, works best in Chrome.']
   };
   function startScreenEngine() {
     const e = $('engStart').value;
-    $('key').style.display = (e === 'free' || e === 'livefree') ? 'none' : '';
+    $('key').style.display = (e === 'free' || e === 'livefree' || e === 'instant') ? 'none' : '';
     $('key').placeholder = KEYHELP[e][0];
     $('key').value = (e === 'gemini' || e === 'live') ? (S.gkey || '') : e === 'claude' ? (S.key || '') : '';
     $('keyhelp').innerHTML = KEYHELP[e][1];
@@ -2116,6 +2343,7 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     keepAwake(); setStatus('Looking for subtitles…');
     if (S.engine === 'free') loadOCR().catch(e => setStatus(e.message));
     sessionStart = Date.now(); watch();
+    if (S.engine === 'instant') instantLoop();
   };
 })();
 </script>
