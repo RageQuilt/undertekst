@@ -197,6 +197,12 @@
   <input type="password" id="sfKey" placeholder="OpenSubtitles API key" style="width:100%;margin-top:8px" autocomplete="off">
   <div class="row" style="margin-top:8px"><input type="text" id="sfUser" placeholder="Username (optional)" style="flex:1" autocomplete="off"><input type="password" id="sfPass" placeholder="Password" style="flex:1" autocomplete="off"></div>
 </div>
+<div id="selftest" class="overlay" style="z-index:80">
+  <div class="ohead"><h2>🩺 Self-test</h2><button class="big" id="stClose">Close</button></div>
+  <div class="note">Put the phone near the TV with something playing, then tap Run. It takes about a minute and uses a few seconds of Gemini.</div>
+  <div class="row" style="margin-top:10px"><button class="big on" id="stRun">Run self-test</button><button class="big" id="stCopy">Copy report</button></div>
+  <pre id="stOut" style="white-space:pre-wrap;font-size:12px;background:#000;border:1px solid #333;border-radius:8px;padding:10px;margin-top:10px;max-height:60vh;overflow:auto;-webkit-user-select:text;user-select:text"></pre>
+</div>
 <div id="langCard" class="overlay" style="display:none;background:rgba(0,0,0,.75);padding:0">
   <div style="position:absolute;left:12px;right:12px;top:30%;background:#161616;border:1px solid #ffd400;border-radius:16px;padding:16px">
     <div style="font-weight:700;font-size:18px;margin-bottom:10px">TV language → my language</div>
@@ -234,6 +240,7 @@
 <!-- Settings -->
 <div class="overlay" id="settings">
   <div class="ohead"><h2>Settings</h2><button class="big" id="setclose">Close</button></div>
+  <button class="big" id="stOpen2" style="width:100%">🩺 Run self-test</button>
   <label>English text size: <span id="fsEnv"></span></label>
   <input type="range" id="fsEn" min="14" max="56">
   <label>Danish text size: <span id="fsDav"></span></label>
@@ -402,6 +409,7 @@
   </select>
   <input id="key" type="password" autocomplete="off">
   <p style="font-size:13px" id="keyhelp"></p>
+  <button class="big" id="stOpen1" style="margin-top:6px">🩺 Something not working? Run self-test</button>
   <button id="go">Start</button>
   <div id="err"></div>
 </div>
@@ -2730,6 +2738,90 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   };
   sfUI();
 
+  // ---------- 🩺 self-test: checks every part on this phone and writes a report ----------
+  async function selfTest() {
+    const out = $('stOut'); out.textContent = '';
+    const log = t => { out.textContent += t + '\n'; out.scrollTop = out.scrollHeight; };
+    const step = async (name, fn) => { log('▶ ' + name + '…'); try { log('   ' + (await fn())); } catch (e) { log('   ✗ ' + (e && (e.message || e.name) || e)); } };
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    log(`Undertekst self-test ${new Date().toISOString()}`);
+    log(`Browser: ${navigator.userAgent}`);
+    log(`Secure page: ${window.isSecureContext}  engine: ${S.engine}  languages: ${S.srcLang}→${S.dstLang}`);
+    log(`Keys saved: Claude ${S.key ? 'yes' : 'no'}, Gemini ${S.gkey ? 'yes (' + S.gkey.length + ' chars)' : 'no'}, OpenSubtitles ${S.osKey ? 'yes' : 'no'}`);
+    let micStream = null;
+    await step('Microphone', async () => {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext(), an = ctx.createAnalyser(); ctx.createMediaStreamSource(micStream).connect(an);
+      const d = new Uint8Array(1024); let peak = 0;
+      for (let i = 0; i < 15; i++) { await wait(100); an.getByteTimeDomainData(d); for (const v of d) peak = Math.max(peak, Math.abs(v - 128) / 128); }
+      const sr = ctx.sampleRate; ctx.close();
+      return `✓ works, sample rate ${sr} Hz, loudest ${peak.toFixed(2)} ${peak < 0.02 ? '(almost silent: is the TV on and near?)' : ''}`;
+    });
+    await step('16 kHz audio (needed for Gemini)', async () => {
+      let ctx; try { ctx = new AudioContext({ sampleRate: 16000 }); } catch (e) { ctx = new AudioContext(); }
+      const ok = !!ctx.audioWorklet; const sr = ctx.sampleRate; ctx.close();
+      return ok ? `✓ audio processing available (context ${sr} Hz)` : '✗ this browser has no AudioWorklet';
+    });
+    await step('Phone speech recognition (free live mode, 6 s, TV language ' + srLang() + ')', () => new Promise(res => {
+      if (!SR) return res('✗ not available in this browser');
+      const r = new SR(); r.lang = srLang(); r.continuous = true; r.interimResults = true; let got = '', err = '';
+      r.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) got = e.results[i][0].transcript; };
+      r.onerror = e => { err = e.error; };
+      try { r.start(); } catch (e) { return res('✗ ' + e.message); }
+      setTimeout(() => { try { r.stop(); } catch (e) {} res(got ? `✓ heard: "${got.slice(0, 60)}"` : err ? `✗ error: ${err}` : '✗ ran, but heard no words'); }, 6000);
+    }));
+    if (S.gkey) for (const v of VARIANTS) await step(`Gemini Live: ${v.name} (${v.setup.model.split('/')[1]})`, () => new Promise(res => {
+      const ws = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${v.ver}.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(S.gkey)}`);
+      const setup = JSON.parse(JSON.stringify(v.setup)); if (setup.generationConfig.translationConfig) setup.generationConfig.translationConfig.targetLanguageCode = S.dstLang;
+      const seen = {}; let done = false, ctx = null, node = null;
+      const finish = t => { if (done) return; done = true; try { node && node.disconnect(); ctx && ctx.close(); } catch (e) {} try { ws.close(); } catch (e) {} res(t); };
+      ws.onopen = () => ws.send(JSON.stringify({ setup }));
+      ws.onmessage = async ev => {
+        let m; try { m = JSON.parse(typeof ev.data === 'string' ? ev.data : await ev.data.text()); } catch (e) { return; }
+        for (const k of Object.keys(m)) seen[k] = (seen[k] || 0) + 1;
+        const sc = m.serverContent;
+        if (sc) { if (sc.inputTranscription) seen['heard:' + (sc.inputTranscription.text || '').slice(0, 30)] = 1; if (sc.outputTranscription) seen['translated:' + (sc.outputTranscription.text || '').slice(0, 30)] = 1; if (sc.modelTurn) seen.audio = (seen.audio || 0) + 1; }
+        if (m.setupComplete && micStream) {
+          // send 8 s of the microphone
+          try { ctx = new AudioContext({ sampleRate: 16000 }); } catch (e) { ctx = new AudioContext(); }
+          const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+          await ctx.audioWorklet.addModule(url);
+          node = new AudioWorkletNode(ctx, 'pcm16', { processorOptions: { rate: ctx.sampleRate } });
+          node.port.onmessage = e => { if (ws.readyState === 1) { ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(e.data.pcm), mimeType: 'audio/pcm;rate=16000' } } })); seen.sentChunks = (seen.sentChunks || 0) + 1; } };
+          ctx.createMediaStreamSource(micStream).connect(node);
+          setTimeout(() => finish('connected; got from Google: ' + JSON.stringify(seen)), 8000);
+        }
+      };
+      ws.onclose = ev => finish(`closed: code ${ev.code} "${ev.reason}" ; got: ${JSON.stringify(seen)}`);
+      setTimeout(() => finish('no answer in 15 s; got: ' + JSON.stringify(seen)), 15000);
+    }));
+    else log('▶ Gemini Live: skipped (no Gemini key saved)');
+    await step('Google Translate', async () => { const t = await googleTranslate('Hvor har du været?'); return '✓ "' + t + '"'; });
+    await step('OpenSubtitles search', async () => {
+      if (!S.osKey) return '✗ no OpenSubtitles API key saved (📄 panel)';
+      const r = await fetchT(OS_BASE + '/subtitles?languages=da&query=borgen', { headers: osHeaders(false) }, 12000);
+      const body = (await r.text()).slice(0, 160);
+      return (r.ok ? '✓ ' : '✗ ') + 'status ' + r.status + ' ' + body;
+    });
+    await step('OpenSubtitles login', async () => {
+      if (!S.osUser) return 'skipped (no username)';
+      const r = await fetchT(OS_BASE + '/login', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ username: S.osUser, password: S.osPass }) }, 12000);
+      return (r.ok ? '✓ ' : '✗ ') + 'status ' + r.status + ' ' + (await r.text()).slice(0, 120);
+    });
+    await step('On-phone reader (download + load)', async () => { const t0 = performance.now(); await loadPaddle(); return `✓ ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`; });
+    await step('Camera', async () => {
+      const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      const tr = st.getVideoTracks()[0], set = tr.getSettings(); st.getTracks().forEach(t => t.stop());
+      return `✓ ${set.width}×${set.height}`;
+    });
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    log('Done. Tap "Copy report" and paste it to Claude.');
+  }
+  const openST = () => { $('selftest').style.display = 'block'; };
+  $('stOpen1').onclick = openST; $('stOpen2').onclick = openST;
+  $('stClose').onclick = () => { $('selftest').style.display = 'none'; };
+  $('stRun').onclick = async () => { $('stRun').disabled = true; try { await selfTest(); } finally { $('stRun').disabled = false; } };
+  $('stCopy').onclick = async () => { try { await navigator.clipboard.writeText($('stOut').textContent); $('stCopy').textContent = 'Copied ✓'; } catch (e) { $('stCopy').textContent = 'Select the text and copy'; } setTimeout(() => $('stCopy').textContent = 'Copy report', 2000); };
   applyLangs(false);
   // ---------- start ----------
   const KEYHELP = {
