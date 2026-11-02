@@ -205,6 +205,11 @@
   <label>Danish text size: <span id="fsDav"></span></label>
   <input type="range" id="fsDa" min="14" max="56">
   <label class="row" style="color:#ccc"><input type="checkbox" id="showspk"> Show who is speaking (M1, W1…)</label>
+  <label>Spoken language on the TV (for the free live mode and 🎤≠; Gemini detects it by itself)</label>
+  <select id="spokenLang" style="width:100%">
+    <option value="da-DK">Danish</option><option value="en-US">English</option><option value="sv-SE">Swedish</option><option value="nb-NO">Norwegian</option>
+    <option value="de-DE">German</option><option value="fr-FR">French</option><option value="es-ES">Spanish</option><option value="it-IT">Italian</option>
+  </select>
   <label>Engine</label>
   <select id="engine">
     <option value="claude">Claude AI (best: speakers + word links)</option>
@@ -379,7 +384,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'instant'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), spokenLang: store.get('spokenLang', 'da-DK'), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   store.del('rpm');   // older versions saved a slowed-down speed here; never again
@@ -483,6 +488,8 @@
   $('showdiag').onchange = e => { S.diag = e.target.checked; store.set('diag', S.diag); $('diag').style.display = S.diag ? 'block' : 'none'; };
   $('smartskip').checked = S.smartSkip;
   $('smartskip').onchange = e => { S.smartSkip = e.target.checked; store.set('smartSkip', S.smartSkip); };
+  $('spokenLang').value = S.spokenLang;
+  $('spokenLang').onchange = e => { S.spokenLang = e.target.value; store.set('spokenLang', S.spokenLang); if (LV.rec) { try { LV.rec.lang = S.spokenLang; LV.rec.stop(); } catch (er) {} } };
   $('model').value = S.model;
   $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
   // engine choice
@@ -1633,7 +1640,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
   function startHearing() {
     if (!SR) { S.hear = false; store.set('hear', false); quickUI(); quickToast('This browser can\'t listen (try Chrome)'); return; }
     if (rec) return;
-    rec = new SR(); rec.lang = 'da-DK'; rec.continuous = true; rec.interimResults = false;
+    rec = new SR(); rec.lang = S.spokenLang; rec.continuous = true; rec.interimResults = false;
     rec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++)
         if (e.results[i].isFinal) { heard.push({ t: Date.now(), text: e.results[i][0].transcript }); if (heard.length > 200) heard.shift(); }
@@ -2003,15 +2010,23 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   // Setup layouts to try, in order. The first one follows Google's official API definition (transcription settings at the
   // top of "setup"); the others cover the layout in Google's translation guide, the older API version, and finally the
   // general live model instructed to act as an interpreter. The one that works is remembered.
-  const TR = { targetLanguageCode: 'en', echoTargetLanguage: false };
-  const INTERP = 'You are a live interpreter for someone watching Danish TV. Translate everything you hear from Danish into English, sentence by sentence, as quickly as possible. Never answer, comment or add anything: only translate. If you hear English, stay silent.';
+  const TR = { targetLanguageCode: 'en', echoTargetLanguage: true };   // true: also transcribe speech Google thinks is already English
+  const INTERP = 'You are a live interpreter for someone watching TV. Translate everything you hear, in any language, into English, sentence by sentence, as quickly as possible. Never answer questions, comment or add anything: only translate. If what you hear is already English, repeat it in English.';
   const VARIANTS = [
     { name: 'translate', ver: 'v1beta', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], translationConfig: TR }, inputAudioTranscription: {}, outputAudioTranscription: {} } },
     { name: 'translate (guide layout)', ver: 'v1beta', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {}, translationConfig: TR } } },
     { name: 'translate v1alpha', ver: 'v1alpha', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], translationConfig: TR }, inputAudioTranscription: {}, outputAudioTranscription: {} } },
+    { name: 'translate (both layouts)', ver: 'v1beta', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {}, translationConfig: TR }, inputAudioTranscription: {}, outputAudioTranscription: {} } },
     { name: 'interpreter', ver: 'v1beta', setup: { model: 'models/gemini-3.1-flash-live-preview', generationConfig: { responseModalities: ['AUDIO'] }, systemInstruction: { parts: [{ text: INTERP }] }, inputAudioTranscription: {}, outputAudioTranscription: {} } },
   ];
   let variantIdx = Math.min(VARIANTS.length - 1, Math.max(0, +store.get('gemVariant', 0) || 0)), failsInRow = 0;
+  function nextVariant(why) {
+    variantIdx = (variantIdx + 1) % VARIANTS.length; store.del('gemVariant');
+    LV.msgs = LV.textMsgs = LV.audioMsgs = 0; LV.loudChunks = 0; LV.switching = false;
+    setStatus(`${why} → trying ${VARIANTS[variantIdx].name}…`);
+    const old = LV.ws; LV.ws = null; try { old && old.close(); } catch (e) {}
+    setTimeout(() => { if (LV.on) geminiConnect(); }, 300);
+  }
   function geminiConnect() {
     const v = VARIANTS[variantIdx];
     const ws = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${v.ver}.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(S.gkey)}`);
@@ -2022,13 +2037,20 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     ws.onmessage = async ev => {
       let m; try { m = JSON.parse(typeof ev.data === 'string' ? ev.data : await ev.data.text()); } catch (e) { return; }
       if (m.setupComplete) {
-        gotSetup = true; LV.ready = true; failsInRow = 0; store.set('gemVariant', variantIdx);
+        gotSetup = true; LV.ready = true; failsInRow = 0; LV.loudChunks = 0;
         setStatus('🎧 Listening…'); if (prev && prev !== ws) try { prev.close(); } catch (e) {} return;
       }
       if (m.error) { LV.lastErr = m.error.message || JSON.stringify(m.error); }
       if (m.goAway) { geminiConnect(); return; }                 // session ending soon: open a fresh one, no gap
       const sc = m.serverContent; if (!sc) return;
       LV.msgs = (LV.msgs || 0) + 1;
+      const hasText = !!((sc.inputTranscription && sc.inputTranscription.text) || (sc.outputTranscription && sc.outputTranscription.text));
+      if (hasText) { LV.textMsgs = (LV.textMsgs || 0) + 1; if (LV.textMsgs === 3) store.set('gemVariant', variantIdx); }   // remember a layout only once it has proven itself
+      else if (sc.modelTurn && (sc.modelTurn.parts || []).some(pt => pt.inlineData)) {
+        LV.audioMsgs = (LV.audioMsgs || 0) + 1;
+        // Google is translating (audio is coming back) but sends no text: the transcript setting was ignored in this layout
+        if (LV.audioMsgs >= 6 && !LV.textMsgs && !LV.switching) { LV.switching = true; nextVariant('Gemini sends audio but no text'); return; }
+      }
       if (sc.inputTranscription && sc.inputTranscription.text) liveAdd('da', sc.inputTranscription.text);
       if (sc.outputTranscription && sc.outputTranscription.text) liveAdd('en', sc.outputTranscription.text);
       if (sc.turnComplete && LV.cur && LV.cur.enText) liveFinish();
@@ -2067,6 +2089,9 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
         if (!listening() || !LV.ready || !LV.ws || LV.ws.readyState !== 1) return;
         LV.ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(pcm), mimeType: 'audio/pcm;rate=16000' } } }));
         LV.sentChunks = (LV.sentChunks || 0) + 1;
+        if (LV.level > 0.05 || window.__fakeLoud) LV.loudChunks = (LV.loudChunks || 0) + 1;
+        // 20 s of real sound sent and not one word back: try the next layout/model
+        if (LV.loudChunks > 200 && !LV.msgs && !LV.switching) { LV.switching = true; nextVariant('Gemini heard 20 s of sound but answered nothing'); }
         LV.secs += 0.1;
       });
       setInterval(() => { if (LV.secs >= 5) { addCost(LV.secs / 60 * LIVE_PRICE_PER_MIN); LV.secs = 0; } }, 1000);
@@ -2084,14 +2109,14 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
         if (Date.now() - t0 > 8000 && !conv.length) hint = LV.level < 0.02 ? '  · mic hears almost nothing: move the phone closer to the TV' : '  · hearing sound, waiting for speech…';
         $('status').textContent = '🎧 ' + bars + hint;
       }
-      if (S.diag) $('diag').textContent = `LIVE ${S.engine === 'live' ? (LV.variant || '') : 'free'}  ready ${LV.ready ? 'yes' : 'no'}  msgs ${LV.msgs || 0}\nmic ${LV.level.toFixed(2)}  sent ${(LV.sentChunks || 0)} chunks\nlast close: ${LV.lastClose || '-'}`;
+      if (S.diag) $('diag').textContent = `LIVE ${S.engine === 'live' ? (LV.variant || '') : 'free'}  ready ${LV.ready ? 'yes' : 'no'}  msgs ${LV.msgs || 0} (text ${LV.textMsgs || 0}, audio ${LV.audioMsgs || 0})\nmic ${LV.level.toFixed(2)}  sent ${(LV.sentChunks || 0)} chunks\nlast close: ${LV.lastClose || '-'}`;
     }, 200);
   }
 
   // --- free live: the phone's own Danish speech recognition + Google Translate ---
   function startFreeLive() {
     if (!SR) { setStatus('This browser has no speech recognition. Use Chrome, or the Gemini live mode.'); return; }
-    const rec = new SR(); LV.rec = rec; rec.lang = 'da-DK'; rec.continuous = true; rec.interimResults = true;
+    const rec = new SR(); LV.rec = rec; rec.lang = S.spokenLang; rec.continuous = true; rec.interimResults = true;
     let base = '';
     rec.onresult = e => {
       if (!listening()) return;
