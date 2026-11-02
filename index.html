@@ -169,9 +169,34 @@
 </div>
 <div id="zoomtip"></div>
 <div id="quick" class="fade">
-  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button><button class="ib" id="qStudy">📖 Off</button><button class="ib" id="qLang">DA→EN</button><button class="ib" id="qClear">🗑</button>
+  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button><button class="ib" id="qStudy">📖 Off</button><button class="ib" id="qLang">DA→EN</button><button class="ib" id="qClear">🗑</button><button class="ib" id="qSub" style="display:none">📄</button>
 </div>
 <div id="card"></div>
+<div id="subfind" class="overlay">
+  <div class="ohead"><h2>📄 Subtitle file</h2><button class="big" id="sfClose">Close</button></div>
+  <div class="note" id="sfState" style="white-space:pre-line;color:#ddd"></div>
+  <div class="note" id="sfMsg" style="color:#ffd400"></div>
+  <label>1. Which show?</label>
+  <div class="row"><button class="big" id="sfRecog" style="flex:1">📷 Recognise from the TV</button></div>
+  <div class="note">Works best if you pause on a screen that shows the title (the streaming app's pause screen usually shows the show and episode). Uses your Claude key, about 1¢.</div>
+  <input type="text" id="sfTitle" placeholder="Show or film name" style="width:100%;margin-top:8px" autocomplete="off">
+  <div class="row" style="margin-top:8px"><input type="number" id="sfSeason" placeholder="Season" style="flex:1" inputmode="numeric"><input type="number" id="sfEpisode" placeholder="Episode" style="flex:1" inputmode="numeric"></div>
+  <div class="row" style="margin-top:8px"><button class="big" id="sfSearch">Search</button><button class="big on" id="sfBest">Load best match</button></div>
+  <label>TV-language files</label><div id="sfResSrc"></div>
+  <label>My-language files (optional: otherwise lines are translated)</label><div id="sfResDst"></div>
+  <label>2. Keep it in sync</label>
+  <div class="note">Point the camera at the TV: as soon as one subtitle is recognised the app follows the episode, and each line appears the moment it starts. If a line comes too early or late:</div>
+  <div class="row" style="margin-top:8px"><button class="big" id="sfNudgeM">Earlier −0.5 s</button><button class="big" id="sfNudgeP">Later +0.5 s</button></div>
+  <input type="text" id="sfPickQ" placeholder="Or type words you just heard to sync by hand" style="width:100%;margin-top:8px" autocomplete="off">
+  <div id="sfPick"></div>
+  <label>Or load files you already have (.srt / .vtt)</label>
+  <div class="note">TV language:</div><input type="file" id="sfFileSrc" accept=".srt,.vtt,.txt">
+  <div class="note">My language:</div><input type="file" id="sfFileDst" accept=".srt,.vtt,.txt">
+  <label>OpenSubtitles account (free)</label>
+  <div class="note">Make a free account at opensubtitles.com, then create an API key under your profile → API consumers. Without logging in you get 5 downloads a day, with login 20.</div>
+  <input type="password" id="sfKey" placeholder="OpenSubtitles API key" style="width:100%;margin-top:8px" autocomplete="off">
+  <div class="row" style="margin-top:8px"><input type="text" id="sfUser" placeholder="Username (optional)" style="flex:1" autocomplete="off"><input type="password" id="sfPass" placeholder="Password" style="flex:1" autocomplete="off"></div>
+</div>
 <div id="langCard" class="overlay" style="display:none;background:rgba(0,0,0,.75);padding:0">
   <div style="position:absolute;left:12px;right:12px;top:30%;background:#161616;border:1px solid #ffd400;border-radius:16px;padding:16px">
     <div style="font-weight:700;font-size:18px;margin-bottom:10px">TV language → my language</div>
@@ -224,6 +249,7 @@
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
     <option value="instant">⚡ Instant: phone reads subtitles + Google Translate (fastest, free)</option>
+    <option value="subfile">📄 Subtitle file: download the show's subtitles, synced to the TV</option>
     <option value="live">🎧 Live audio: Gemini Live Translate (listens instead of reading)</option>
     <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
@@ -369,6 +395,7 @@
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
     <option value="instant">⚡ Instant: phone reads subtitles + Google Translate (fastest, free)</option>
+    <option value="subfile">📄 Subtitle file: download the show's subtitles, synced to the TV</option>
     <option value="live">🎧 Live audio: Gemini Live Translate (listens instead of reading)</option>
     <option value="livefree">🎧 Live audio, free: phone listens + Google Translate</option>
     <option value="free">Free: phone reads text + Google Translate</option>
@@ -396,7 +423,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'instant'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), srcLang: store.get('srcLang', 'da'), dstLang: store.get('dstLang', 'en'), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), srcLang: store.get('srcLang', 'da'), osKey: store.get('osKey', ''), osUser: store.get('osUser', ''), osPass: store.get('osPass', ''), subLead: 0.1, dstLang: store.get('dstLang', 'en'), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   store.del('rpm');   // older versions saved a slowed-down speed here; never again
@@ -493,7 +520,7 @@
   $('fsEn').oninput = e => { S.fsEn = +e.target.value; store.set('fsEn', S.fsEn); applyFonts(); };
   $('fsDa').oninput = e => { S.fsDa = +e.target.value; store.set('fsDa', S.fsDa); applyFonts(); };
   $('showspk').checked = S.showSpk;
-  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || ['free', 'live', 'livefree', 'instant'].includes(S.engine)); };
+  const applySpk = () => { document.body.classList.toggle('hidespk', !S.showSpk || ['free', 'live', 'livefree', 'instant', 'subfile'].includes(S.engine)); };
   applySpk();
   $('showspk').onchange = e => { S.showSpk = e.target.checked; store.set('showSpk', S.showSpk); applySpk(); };
   $('showdiag').checked = S.diag; $('diag').style.display = S.diag ? 'block' : 'none';
@@ -509,12 +536,13 @@
     $('engGemini').style.display = (S.engine === 'gemini' || S.engine === 'live') ? 'block' : 'none';
     $('engFree').style.display = S.engine === 'free' ? 'block' : 'none';
     $('engInstant').style.display = S.engine === 'instant' ? 'block' : 'none';
-    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || S.engine === 'instant' || isLive());
+    document.body.classList.toggle('hidespk', !S.showSpk || S.engine === 'free' || S.engine === 'instant' || S.engine === 'subfile' || isLive());
   }
   $('engine').onchange = e => {
     S.engine = e.target.value; store.set('engine', S.engine); showEngine();
     if (S.engine === 'free') loadOCR().catch(err => setStatus(err.message));
-    if (S.engine === 'instant' && video.videoWidth) instantLoop();
+    if ((S.engine === 'instant' || S.engine === 'subfile') && video.videoWidth) instantLoop();
+    if (typeof sfUI === 'function') sfUI();
     if ((S.engine === 'claude' && !S.key) || (S.engine === 'gemini' && !S.gkey)) setStatus('Add your API key below for this engine.');
     lastDaText = ''; updateCost && updateCost();
   };
@@ -1405,7 +1433,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
   async function watch() {
     for (;;) {
       await new Promise(r => setTimeout(r, inFlight >= cap() ? 200 : 120));
-      if (!live || document.hidden || isLive() || S.engine === 'instant') continue;
+      if (!live || document.hidden || isLive() || S.engine === 'instant' || S.engine === 'subfile') continue;
       const now = Date.now();
       if (tvControlled() && !TV.playing) continue;                 // TV paused by the app: nothing new will appear, and the pause screen must not count
       if (now < ignoreUntil) {                                     // TV just resumed or skipped: let Netflix's overlay fade, then take the picture as the new baseline
@@ -1501,7 +1529,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
 
 
   // test hook: lets a page preview run without a camera or API key
-  window.__ut = { IN: () => IN, LV: () => LV, snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
+  window.__ut = { SF: () => SF, IN: () => IN, LV: () => LV, snap: () => dc.toDataURL(), addLines, bank: () => bank, dbg, peek: () => { const m = detectMask(); return m && { n: m.n, tx: m.tx, y0: m.y0, y1: m.y1, h: m.h, brT: dbg.brT }; } };
 
   // ---------- TV remote (Samsung / LG over Wi-Fi) ----------
   // Netflix on TVs skips 10 s per left/right press while playing. We count the time since a line appeared
@@ -2334,6 +2362,11 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   }
   function instantShow(text, conf) {
     const now = Date.now();
+    if (S.engine === 'subfile') {
+      const isNew = !(IN.cur && sameSub(text, IN.curText)) || now - IN.lastSeen > 1500;
+      IN.lastSeen = now; IN.curText = text; IN.cur = IN.cur || {}; IN.curConf = conf;
+      subSync(text, isNew); return;
+    }
     IN.lastSeen = now;
     if (IN.cur && sameSub(text, IN.curText)) {
       // same subtitle read again: keep it, but take the better reading
@@ -2389,7 +2422,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     let lastFull = 0;
     for (;;) {
       await new Promise(r => setTimeout(r, 30));
-      if (S.engine !== 'instant') { IN.loopOn = false; return; }
+      if (S.engine !== 'instant' && S.engine !== 'subfile') { IN.loopOn = false; return; }
       const now = Date.now();
       if (!live || document.hidden || (tvControlled() && !TV.playing) || now < ignoreUntil || !video.videoWidth) { await new Promise(r => setTimeout(r, 200)); continue; }
       const t0 = performance.now();
@@ -2398,6 +2431,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
         const useRoi = IN.roi && now - IN.roiT < 5000 && now - lastFull < 6000;
         const region = useRoi ? IN.roi : { x: c.x0, y: c.y0, w: c.sw, h: c.sh };
         if (!useRoi) lastFull = now;
+        IN.prevCap = IN.capT || Date.now(); IN.capT = Date.now();          // when this camera frame was taken
         const boxes = await paddleDetect(video, region, useRoi ? 800 : 960);
         const block = pickSubtitle(boxes);
         if (!block) {
@@ -2433,6 +2467,269 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     }
   }
 
+  // ---------- 📄 SUBTITLE FILE engine: download the show's subtitles, follow the episode's timeline ----------
+  // The camera (on-phone reader) recognises the subtitle on screen, finds it in the downloaded file, and from then
+  // on the app knows the playback position: each translated line appears the moment its subtitle starts.
+  const SF = { src: [], dst: [], map: null, tr: new Map(), anchor: null, lastIdx: -1, pending: null, confirmT: 0, srcName: '', dstName: '' };
+  const OS_BASE = 'https://api.opensubtitles.com/api/v1';
+  const OS_LANG = { pt: 'pt-pt,pt-br', no: 'no' };
+  function parseSubs(txt) {
+    const cues = [], t = String(txt).replace(/\r/g, '').replace(/^﻿/, '');
+    const re = /(\d{1,2}:)?(\d{1,2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}:)?(\d{1,2}):(\d{2})[,.](\d{1,3})[^\n]*\n([\s\S]*?)(?=\n\s*\n|$)/g;
+    const sec = (h, m, s, ms) => (parseInt(h || '0', 10) * 3600) + parseInt(m, 10) * 60 + parseInt(s, 10) + parseInt((ms + '00').slice(0, 3), 10) / 1000;
+    let m;
+    while ((m = re.exec(t))) {
+      const text = m[9].replace(/<[^>]+>/g, '').replace(/\{[^}]*\}/g, '').split('\n').map(x => x.trim()).filter(Boolean).join(' ').trim();
+      if (!text) continue;
+      cues.push({ s: sec(m[1] && m[1].slice(0, -1), m[2], m[3], m[4]), e: sec(m[5] && m[5].slice(0, -1), m[6], m[7], m[8]), text, n: norm(text) });
+    }
+    cues.sort((a, b) => a.s - b.s);
+    return cues;
+  }
+  // pair each TV-language cue with the my-language cues that play at the same time (files can be offset by a few seconds)
+  function alignFiles() {
+    SF.map = null; if (!SF.src.length || !SF.dst.length) return;
+    const starts = SF.dst.map(c => c.s);
+    const near = x => { let lo = 0, hi = starts.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] < x) lo = mid + 1; else hi = mid; } return Math.min(Math.abs(starts[lo] - x), lo ? Math.abs(starts[lo - 1] - x) : 1e9); };
+    let best = 0, bestD = 0;
+    for (let d = -20; d <= 20; d += 0.1) { let sc = 0; for (const c of SF.src) if (near(c.s + d) < 0.35) sc++; if (sc > best) { best = sc; bestD = d; } }
+    if (best < SF.src.length * 0.25) { SF.alignNote = 'files do not line up: using translation'; return; }
+    SF.alignNote = `files lined up (${Math.round(100 * best / SF.src.length)}% match, ${bestD.toFixed(1)} s offset)`;
+    SF.map = SF.src.map(c => {
+      const a = c.s + bestD, b = c.e + bestD;
+      return SF.dst.filter(x => Math.min(b, x.e) - Math.max(a, x.s) > 0.5 * Math.min(x.e - x.s, b - a)).map(x => x.text).join(' ');
+    });
+  }
+  function targetFor(i) {
+    if (SF.src.length) {
+      if (SF.map && SF.map[i]) return Promise.resolve(SF.map[i]);
+      const c = SF.src[i];
+      if (!SF.tr.has(i)) SF.tr.set(i, googleTranslate(c.text).catch(() => ''));
+      return SF.tr.get(i);
+    }
+    return Promise.resolve(SF.dst[i] ? SF.dst[i].text : '');
+  }
+  const cues = () => SF.src.length ? SF.src : SF.dst;
+  function position() {
+    if (!SF.anchor) return null;
+    const now = Date.now();
+    if (SF.anchor.frozen) return SF.anchor.pos;
+    return SF.anchor.pos + (now - SF.anchor.wall) / 1000 - pausedSince(SF.anchor.wall) / 1000;
+  }
+  function setAnchor(pos, why, wall) { SF.anchor = { pos, wall: wall || Date.now(), why }; SF.lastSync = Date.now(); sfUI(); }
+  function cueAt(p) { const cs = cues(); for (let i = Math.max(0, SF.lastIdx - 2); i < cs.length; i++) if (p >= cs[i].s && p < cs[i].e) return i; for (let i = 0; i < cs.length; i++) if (p >= cs[i].s && p < cs[i].e) return i; return -1; }
+  function bestMatch(text, around) {
+    const cs = cues(); const n = norm(text); if (!n || !cs.length) return null;
+    let best = null;
+    for (let i = 0; i < cs.length; i++) {
+      if (around !== null && Math.abs(cs[i].s - around) > 40) continue;
+      const sc = dice(n, cs[i].n);
+      if (!best || sc > best.sc) best = { i, sc };
+    }
+    return best;
+  }
+  function dice(a, b) {
+    a = a.replace(/ /g, ''); b = b.replace(/ /g, ''); if (!a || !b) return 0; if (a === b) return 1;
+    const m = new Map(); for (let i = 0; i < a.length - 1; i++) { const g = a.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
+    let hit = 0; for (let i = 0; i < b.length - 1; i++) { const g = b.substr(i, 2), c = m.get(g); if (c) { hit++; m.set(g, c - 1); } }
+    return 2 * hit / Math.max(1, a.length + b.length - 2);
+  }
+  // called by the on-phone reader with each subtitle it sees on the TV
+  async function subSync(text, isNew) {
+    if (!cues().length) return;
+    // timing: this frame was taken at capT; a NEW subtitle appeared on average halfway since the previous frame
+    const capT = IN.capT || Date.now(), since = Math.min(1, Math.max(0.05, (capT - (IN.prevCap || capT)) / 2000));
+    let probe = text;
+    if (!SF.src.length) { try { probe = await googleTranslate(text); } catch (e) { return; } }   // only a my-language file: compare in that language
+    const p = position();
+    let m = p !== null ? bestMatch(probe, p) : null;
+    const local = m && m.sc >= (SF.src.length ? 0.62 : 0.45);
+    if (!local) {
+      m = bestMatch(probe, null);
+      if (!m || m.sc < (SF.src.length ? 0.72 : 0.55) || norm(probe).length < 6) return;
+      // a jump far from where we thought we were (or the first sync): wait for a second line to agree
+      const est = cues()[m.i].s + since;
+      if (!SF.pending || Math.abs((est - SF.pending.est) - (Date.now() - SF.pending.wall) / 1000) > 3 || SF.pending.i === m.i) {
+        if (!SF.pending || SF.pending.i !== m.i) SF.pending = { i: m.i, est, wall: Date.now() };
+        if (SF.anchor) return;                                   // keep following the old position until confirmed
+        if (m.sc < 0.85) return;                                 // first sync: accept straight away only on a near-perfect match
+      }
+      SF.pending = null;
+      setAnchor(isNew ? est : cues()[m.i].s + since, 'jump', capT); return;
+    }
+    SF.pending = null;
+    const c = cues()[m.i];
+    if (isNew) {
+      const pc = p - (Date.now() - capT) / 1000;                 // where our clock was when the frame was taken
+      const est = c.s + since;
+      if (Math.abs(est - pc) > 0.15) setAnchor(Math.abs(est - pc) < 1.5 ? pc + (est - pc) * 0.6 : est, 'line', capT);
+      else SF.lastSync = Date.now();
+    } else if (p > c.e + 1.2) {
+      // the same subtitle is still on screen long after it should have gone: the TV is paused → hold the clock
+      SF.anchor = { pos: c.e - 0.05, wall: Date.now(), frozen: true, why: 'paused?' }; sfUI();
+    } else if (SF.anchor && SF.anchor.frozen) setAnchor(Math.min(p, c.e - 0.05), 'resumed');
+    else SF.lastSync = Date.now();
+  }
+  // show the right line at the right moment
+  setInterval(async () => {
+    if (S.engine !== 'subfile' || !SF.anchor) return;
+    if (SF.anchor.frozen && IN.cur && Date.now() - IN.lastSeen > 1500) setAnchor(SF.anchor.pos, 'resumed');   // the frozen subtitle vanished: playing again
+    const p = position(), i = cueAt(p + (S.subLead || 0));
+    // a subtitle should be on screen but the camera has seen none for a while: the TV is probably paused → hold
+    if (!SF.anchor.frozen && SF.src.length && IN.loopOn && i >= 0 && i === SF.lastIdx && Date.now() - SF.lastSync < 30000) {
+      const c = cues()[i];
+      if (p - c.s > 1.4 && Date.now() - IN.lastSeen > 1400 && Date.now() - (IN.capT || 0) < 800) {
+        SF.anchor = { pos: c.s + 0.2, wall: Date.now(), frozen: true, why: 'no subtitle seen: paused?' }; sfUI(); return;
+      }
+    }
+    if (i < 0 || i === SF.lastIdx) return;
+    SF.lastIdx = i;
+    for (let k = 1; k <= 6; k++) if (i + k < cues().length) targetFor(i + k);   // translate the next lines ahead of time
+    const c = cues()[i];
+    const line = { id: ++lineId, spk: '', da: [], en: [], daText: SF.src.length ? c.text : '', enText: '…', t: Date.now(), seq: 1e12, cue: i };
+    sEn.querySelectorAll('.empty').forEach(e => e.remove()); sDa.querySelectorAll('.empty').forEach(e => e.remove());
+    sEn.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur')); sDa.querySelectorAll('.line.cur').forEach(e => e.classList.remove('cur'));
+    conv.push(line); sEn.appendChild(renderLine(line, 'en')); sDa.appendChild(renderLine(line, 'da'));
+    if (!SF.src.length) line.daText = IN.curText || '';
+    const en = await targetFor(i);
+    line.enText = en || '(no translation)'; redrawLine(line); stickBottom(sEn, true); stickBottom(sDa, true);
+    lastHit = Date.now(); setStatus('');
+    countSeen(line); onNewSubtitle();
+    if (line.daText && S.polish && S.key) aiPolish(line, line.my = 1);
+  }, 50);
+
+  // --- OpenSubtitles ---
+  function osHeaders(json) {
+    const h = { 'Api-Key': S.osKey, 'X-User-Agent': 'Undertekst v1.0', Accept: 'application/json' };
+    if (json) h['Content-Type'] = 'application/json';
+    if (SF.token) h.Authorization = 'Bearer ' + SF.token;
+    return h;
+  }
+  async function osLogin() {
+    if (!S.osUser || !S.osPass || SF.token) return;
+    const r = await fetchT(OS_BASE + '/login', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ username: S.osUser, password: S.osPass }) }, 10000);
+    if (r.ok) { const j = await r.json(); SF.token = j.token; } else sfMsg('OpenSubtitles login failed (' + r.status + '), continuing without login (5 downloads a day).');
+  }
+  async function osSearch(title, season, episode, lang) {
+    const q = { languages: OS_LANG[lang] || lang, order_by: 'download_count', query: title.toLowerCase().trim() };
+    if (season) q.season_number = season; if (episode) q.episode_number = episode;
+    const qs = Object.keys(q).sort().map(k => k + '=' + encodeURIComponent(q[k])).join('&');
+    const r = await fetchT(OS_BASE + '/subtitles?' + qs, { headers: osHeaders(false) }, 12000);
+    if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'OpenSubtitles refused the API key' : 'OpenSubtitles search failed (' + r.status + ')');
+    const j = await r.json();
+    return (j.data || []).filter(d => d.attributes && d.attributes.files && d.attributes.files.length).map(d => {
+      const a = d.attributes, f = a.feature_details || {};
+      return { fileId: a.files[0].file_id, lang: a.language, release: a.release || a.files[0].file_name || '', dl: a.download_count || 0,
+        show: f.parent_title || f.title || '', season: f.season_number, episode: f.episode_number, epTitle: f.title || '' };
+    });
+  }
+  async function osDownload(fileId) {
+    await osLogin();
+    const r = await fetchT(OS_BASE + '/download', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ file_id: fileId, sub_format: 'srt' }) }, 12000);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.link) throw new Error(j.message || ('Download refused (' + r.status + ')'));
+    if (typeof j.remaining === 'number') SF.remaining = j.remaining;
+    const f = await fetchT(j.link, {}, 15000);                    // the file link takes no extra headers
+    return f.text();
+  }
+
+  // --- panel ---
+  function sfMsg(t) { $('sfMsg').textContent = t; }
+  function sfUI() {
+    if (!$('sfState')) return;
+    const n = cues().length;
+    const files = (SF.src.length ? `TV-language file: ${SF.srcName} (${SF.src.length} lines)` : 'No TV-language file') + '\n' +
+      (SF.dst.length ? `My-language file: ${SF.dstName} (${SF.dst.length} lines)` : 'No my-language file (lines are translated)') + (SF.alignNote ? '\n' + SF.alignNote : '');
+    const p = position();
+    const sync = !n ? 'Load subtitles first.' : !SF.anchor ? 'Waiting to sync: point the camera at the TV until a subtitle is recognised, or pick the current line below.'
+      : `Synced ✓  ${Math.floor(p / 60)}:${String(Math.floor(p % 60)).padStart(2, '0')}${SF.anchor.frozen ? ' (paused)' : ''}`;
+    $('sfState').textContent = files + '\n' + sync + (typeof SF.remaining === 'number' ? `\nDownloads left today: ${SF.remaining}` : '');
+    $('qSub').style.display = S.engine === 'subfile' ? '' : 'none';
+    $('qSub').classList.toggle('on', !!SF.anchor);
+  }
+  setInterval(() => { if ($('subfind').style.display === 'block') sfUI(); }, 500);
+  function renderResults(list, slot) {
+    const box = $(slot === 'src' ? 'sfResSrc' : 'sfResDst'); box.innerHTML = '';
+    if (!list.length) { box.innerHTML = '<div class="note">Nothing found in this language.</div>'; return; }
+    for (const r of list.slice(0, 8)) {
+      const b = document.createElement('button'); b.className = 'big'; b.style.cssText = 'width:100%;text-align:left;margin-top:6px;font-size:13px';
+      b.textContent = `${r.lang.toUpperCase()} · ${r.show}${r.season ? ` S${r.season}E${r.episode}` : ''} · ${r.release.slice(0, 40)} · ${r.dl}↓`;
+      b.onclick = () => loadResult(r, slot);
+      box.appendChild(b);
+    }
+  }
+  async function loadResult(r, slot) {
+    sfMsg('Downloading…');
+    try { const txt = await osDownload(r.fileId); loadText(txt, slot, `${r.show} ${r.season ? 'S' + r.season + 'E' + r.episode : ''} (${r.lang})`); }
+    catch (e) { sfMsg(e.message); }
+  }
+  function loadText(txt, slot, name) {
+    const cs = parseSubs(txt);
+    if (cs.length < 5) { sfMsg('That file has no readable subtitles.'); return; }
+    if (slot === 'src') { SF.src = cs; SF.srcName = name; } else { SF.dst = cs; SF.dstName = name; }
+    SF.tr.clear(); SF.lastIdx = -1; alignFiles(); sfUI(); sfMsg(`Loaded ${cs.length} lines.`);
+    if (S.engine === 'subfile' && !IN.loopOn && video.videoWidth) instantLoop();
+  }
+  $('sfSearch').onclick = async () => {
+    const title = $('sfTitle').value.trim(); if (!title) { sfMsg('Type the show or film name.'); return; }
+    if (!S.osKey) { sfMsg('Paste your free OpenSubtitles API key first.'); return; }
+    const se = +$('sfSeason').value || 0, ep = +$('sfEpisode').value || 0;
+    const srcL = S.srcLang === 'auto' ? 'da' : S.srcLang;
+    sfMsg('Searching…');
+    try {
+      const [a, b] = await Promise.all([osSearch(title, se, ep, srcL), S.dstLang !== srcL ? osSearch(title, se, ep, S.dstLang) : Promise.resolve([])]);
+      SF.found = { src: a, dst: b };
+      renderResults(a, 'src'); renderResults(b, 'dst');
+      sfMsg(a.length || b.length ? 'Tap a file to load it, or "Load best match".' : 'Nothing found. Check the spelling, or try without season/episode.');
+    } catch (e) { sfMsg(e.message); }
+  };
+  $('sfBest').onclick = async () => {
+    if (!SF.found) { await $('sfSearch').onclick(); if (!SF.found) return; }
+    if (SF.found.src[0]) await loadResult(SF.found.src[0], 'src');
+    if (SF.found.dst[0]) await loadResult(SF.found.dst[0], 'dst');
+  };
+  $('sfFileSrc').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => loadText(t, 'src', f.name)); };
+  $('sfFileDst').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => loadText(t, 'dst', f.name)); };
+  $('sfKey').value = S.osKey || ''; $('sfUser').value = S.osUser || ''; $('sfPass').value = S.osPass || '';
+  $('sfKey').onchange = e => { S.osKey = e.target.value.trim(); store.set('osKey', S.osKey); };
+  $('sfUser').onchange = e => { S.osUser = e.target.value.trim(); store.set('osUser', S.osUser); SF.token = null; };
+  $('sfPass').onchange = e => { S.osPass = e.target.value; store.set('osPass', S.osPass); SF.token = null; };
+  $('sfNudgeM').onclick = () => { const p = position(); if (p !== null) { setAnchor(p - 0.5, 'nudge'); SF.lastIdx = -1; } };
+  $('sfNudgeP').onclick = () => { const p = position(); if (p !== null) { setAnchor(p + 0.5, 'nudge'); SF.lastIdx = -1; } };
+  $('sfClose').onclick = () => { $('subfind').style.display = 'none'; };
+  $('qSub').onclick = () => { $('subfind').style.display = 'block'; sfUI(); };
+  // pick the current line by hand (works without the camera)
+  $('sfPickQ').oninput = () => {
+    const q = norm($('sfPickQ').value), box = $('sfPick'); box.innerHTML = '';
+    if (q.length < 2) return;
+    cues().map((c, i) => [c, i]).filter(([c]) => c.n.includes(q)).slice(0, 12).forEach(([c, i]) => {
+      const b = document.createElement('button'); b.className = 'big'; b.style.cssText = 'width:100%;text-align:left;margin-top:6px;font-size:13px';
+      b.textContent = `${Math.floor(c.s / 60)}:${String(Math.floor(c.s % 60)).padStart(2, '0')}  ${c.text}`;
+      b.onclick = () => { setAnchor(c.s, 'picked'); SF.lastIdx = -1; $('subfind').style.display = 'none'; quickToast('Synced to that line'); };
+      box.appendChild(b);
+    });
+  };
+  // recognise the show from the TV picture (Claude key): best on a paused streaming screen showing the title
+  $('sfRecog').onclick = async () => {
+    if (!S.key) { sfMsg('Recognising needs your Claude key (⚙). Or type the name.'); return; }
+    if (!video.videoWidth) { sfMsg('Start the camera first.'); return; }
+    sfMsg('Looking at the TV…');
+    try {
+      const shot = await grabAsync('locate');
+      const r = await fetchT('https://api.anthropic.com/v1/messages', { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 200,
+          system: 'Identify the TV show or film on the TV in this phone photo. Use any visible title, episode info (streaming pause/info screens often show "S1:E3" and the episode name), channel logo, or recognisable scenes. Reply with JSON only: {"title":"original title","season":1,"episode":3,"sure":true}. Use null for anything you cannot see or know; "sure" false if guessing.',
+          messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.b64 } }, { type: 'text', text: 'What is playing?' }] }] }) }, 15000);
+      const j = await r.json(); addCost(costOf(j.usage, 'claude'));
+      const m = ((j.content || [])[0] || {}).text.match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : {};
+      if (!o.title) { sfMsg('Could not tell. Pause the TV on a screen that shows the title (the streaming app\'s pause screen usually does) and try again.'); return; }
+      $('sfTitle').value = o.title; $('sfSeason').value = o.season || ''; $('sfEpisode').value = o.episode || '';
+      sfMsg(`Looks like ${o.title}${o.season ? ` S${o.season}E${o.episode}` : ''}${o.sure ? '' : ' (a guess: check it)'}. Tap Search.`);
+    } catch (e) { sfMsg('Recognising failed: ' + e.message); }
+  };
+  sfUI();
+
   applyLangs(false);
   // ---------- start ----------
   const KEYHELP = {
@@ -2440,12 +2737,13 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     gemini: ['Paste your Gemini API key', 'Get one free at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. The free tier is slower (a few looks per minute). It stays on this phone only.'],
     free: ['', 'No key needed. Less accurate than the AI engines, and no speaker tags.'],
     live: ['Paste your Gemini API key', 'Listens to the TV and translates speech <b>while it is being spoken</b>. Get a key at <a href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</a>. About $2 per hour of TV. No camera needed: just put the phone near the TV.'],
+    subfile: ['', 'Finds the episode\'s subtitle file on OpenSubtitles (free account + API key) or loads one you have, then the camera keeps it in sync. Each line appears the moment its subtitle starts.'],
     instant: ['', '<b>Fastest.</b> Your phone reads the subtitles itself (no photos sent anywhere) and translates the text. Free. One-time download of ~13 MB.'],
     livefree: ['', 'Free. Listens to the TV with the phone\'s own Danish speech recognition and translates with Google. Less accurate than Gemini Live, works best in Chrome.']
   };
   function startScreenEngine() {
     const e = $('engStart').value;
-    $('key').style.display = (e === 'free' || e === 'livefree' || e === 'instant') ? 'none' : '';
+    $('key').style.display = (e === 'free' || e === 'livefree' || e === 'instant' || e === 'subfile') ? 'none' : '';
     $('key').placeholder = KEYHELP[e][0];
     $('key').value = (e === 'gemini' || e === 'live') ? (S.gkey || '') : e === 'claude' ? (S.key || '') : '';
     $('keyhelp').innerHTML = KEYHELP[e][1];
@@ -2478,7 +2776,8 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     keepAwake(); setStatus('Looking for subtitles…');
     if (S.engine === 'free') loadOCR().catch(e => setStatus(e.message));
     sessionStart = Date.now(); watch();
-    if (S.engine === 'instant') instantLoop();
+    if (S.engine === 'instant' || S.engine === 'subfile') instantLoop();
+    if (S.engine === 'subfile' && !cues().length) { $('subfind').style.display = 'block'; sfUI(); }
   };
 })();
 </script>
