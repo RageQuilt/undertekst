@@ -147,7 +147,7 @@
 <div class="panel" id="pEn">
   <div class="grip" id="gEnT"></div>
   <div class="head">
-    <span id="dot"></span><span class="tag">EN</span><span id="status"></span>
+    <span id="dot"></span><span class="tag" id="tagDst">EN</span><span id="status"></span>
     <span id="cost"></span>
     <button class="ib on" id="live">Live</button>
     <button class="ib" id="bankbtn">Bank</button>
@@ -160,7 +160,7 @@
 <!-- Danish: bottom -->
 <div class="panel" id="pDa">
   <div class="grip" id="gDa"></div>
-  <div class="head" style="padding-top:0"><span class="tag" style="flex:1">DA</span>
+  <div class="head" style="padding-top:0"><span class="tag" style="flex:1" id="tagSrc">DA</span>
     <span id="tvRemote" class="fade" style="display:none;gap:6px">
       <button class="ib" id="tvRew">⏪10</button><button class="ib" id="tvPP">⏸</button><button class="ib" id="tvFf">10⏩</button>
     </span></div>
@@ -169,9 +169,18 @@
 </div>
 <div id="zoomtip"></div>
 <div id="quick" class="fade">
-  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button><button class="ib" id="qStudy">📖 Off</button>
+  <button class="ib" id="qSpk">👥</button><button class="ib" id="qText">Aa</button><button class="ib" id="qHear">🎤≠</button><button class="ib" id="qCult">🇩🇰 Off</button><button class="ib" id="qStudy">📖 Off</button><button class="ib" id="qLang">DA→EN</button><button class="ib" id="qClear">🗑</button>
 </div>
 <div id="card"></div>
+<div id="langCard" class="overlay" style="display:none;background:rgba(0,0,0,.75);padding:0">
+  <div style="position:absolute;left:12px;right:12px;top:30%;background:#161616;border:1px solid #ffd400;border-radius:16px;padding:16px">
+    <div style="font-weight:700;font-size:18px;margin-bottom:10px">TV language → my language</div>
+    <div class="row" style="">
+    <select id="srcQuick" style="flex:1"><option value="auto">Detect automatically</option><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select><span style="color:#888">→</span><select id="dstQuick" style="flex:1"><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select>
+  </div>
+    <div class="row" style="margin-top:14px"><button class="big" id="langSwap">⇄ Swap</button><button class="big on" id="langDone">Done</button></div>
+  </div>
+</div>
 <div id="diag"></div>
 <div id="study"><button id="studyGo">▶ Continue</button><div class="bar"><i id="studyBar"></i></div></div>
 
@@ -205,11 +214,11 @@
   <label>Danish text size: <span id="fsDav"></span></label>
   <input type="range" id="fsDa" min="14" max="56">
   <label class="row" style="color:#ccc"><input type="checkbox" id="showspk"> Show who is speaking (M1, W1…)</label>
-  <label>Spoken language on the TV (for the free live mode and 🎤≠; Gemini detects it by itself)</label>
-  <select id="spokenLang" style="width:100%">
-    <option value="da-DK">Danish</option><option value="en-US">English</option><option value="sv-SE">Swedish</option><option value="nb-NO">Norwegian</option>
-    <option value="de-DE">German</option><option value="fr-FR">French</option><option value="es-ES">Spanish</option><option value="it-IT">Italian</option>
-  </select>
+  <label>Languages: TV language → my language</label>
+  <div class="row" style="">
+    <select id="srcLang" style="flex:1"><option value="auto">Detect automatically</option><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select><span style="color:#888">→</span><select id="dstLang" style="flex:1"><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select>
+  </div>
+  <div class="note">"Detect automatically" works with ⚡ Instant, camera and Gemini Live. The free listening mode needs the TV language chosen (it uses Danish otherwise).</div>
   <label>Engine</label>
   <select id="engine">
     <option value="claude">Claude AI (best: speakers + word links)</option>
@@ -353,6 +362,9 @@
 <div id="start">
   <h1>Undertekst</h1>
   <p>Point your phone at the TV. English appears on top, Danish below. Tap a word to see its match, double-tap to save it to your word bank.</p>
+  <div style="width:100%;max-width:420px;margin-top:14px;text-align:left"><div style="font-size:13px;color:#aaa;margin-bottom:4px">TV language → my language</div><div class="row" style="">
+    <select id="srcStart" style="flex:1"><option value="auto">Detect automatically</option><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select><span style="color:#888">→</span><select id="dstStart" style="flex:1"><option value="da">Danish</option><option value="en">English</option><option value="sv">Swedish</option><option value="no">Norwegian</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="pt">Portuguese</option><option value="fi">Finnish</option></select>
+  </div></div>
   <select id="engStart" style="width:100%;max-width:420px;margin-top:14px">
     <option value="claude">Claude AI (best: speakers + word links)</option>
     <option value="gemini">Google Gemini AI (free tier available)</option>
@@ -384,7 +396,7 @@
     key: store.get('key', oldKey), gkey: store.get('gkey', ''), engine: store.get('engine', 'instant'),
     gmodel: store.get('gmodel', 'gemini-2.5-flash'), gfree: store.get('gfree', true), model: store.get('model', 'claude-haiku-5-5'), iv: Math.max(800, store.get('iv', 900)),
     fsEn: store.get('fsEn', 26), fsDa: store.get('fsDa', 20), showSpk: store.get('showSpk', true),
-    smartSkip: store.get('smartSkip', true), spokenLang: store.get('spokenLang', 'da-DK'), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
+    smartSkip: store.get('smartSkip', true), srcLang: store.get('srcLang', 'da'), dstLang: store.get('dstLang', 'en'), polish: store.get('polish', true), study: store.get('study', 'off'), studyResume: store.get('studyResume', 'tap'), studySpeed: store.get('studySpeed', 0.5), diag: store.get('diag', false), hear: store.get('hear', false), cult: store.get('cult', 'off'), hEn: store.get('hEn', 0.30), hDa: store.get('hDa', 0.24)
   };
   let bank = store.get('bank', {});
   store.del('rpm');   // older versions saved a slowed-down speed here; never again
@@ -488,8 +500,6 @@
   $('showdiag').onchange = e => { S.diag = e.target.checked; store.set('diag', S.diag); $('diag').style.display = S.diag ? 'block' : 'none'; };
   $('smartskip').checked = S.smartSkip;
   $('smartskip').onchange = e => { S.smartSkip = e.target.checked; store.set('smartSkip', S.smartSkip); };
-  $('spokenLang').value = S.spokenLang;
-  $('spokenLang').onchange = e => { S.spokenLang = e.target.value; store.set('spokenLang', S.spokenLang); if (LV.rec) { try { LV.rec.lang = S.spokenLang; LV.rec.stop(); } catch (er) {} } };
   $('model').value = S.model;
   $('model').onchange = e => { S.model = e.target.value; store.set('model', S.model); };
   // engine choice
@@ -521,7 +531,53 @@
   $('iv').value = S.iv; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s';
   $('iv').oninput = e => { S.iv = +e.target.value; $('ivv').textContent = (S.iv / 1000).toFixed(1) + ' s'; store.set('iv', S.iv); };
   $('forget').onclick = () => { store.del('key'); store.del('gkey'); try { localStorage.removeItem('ut2_key'); } catch (e) {} location.reload(); };
-  $('clearconv').onclick = () => { conv.length = 0; shown.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = ''; $('settings').style.display = 'none'; };
+  // ---------- languages ----------
+  const LANG_NAMES = { auto: 'auto', da: 'Danish', en: 'English', sv: 'Swedish', no: 'Norwegian', de: 'German', fr: 'French', es: 'Spanish', it: 'Italian', nl: 'Dutch', pl: 'Polish', pt: 'Portuguese', fi: 'Finnish' };
+  const SR_CODES = { da: 'da-DK', en: 'en-US', sv: 'sv-SE', no: 'nb-NO', de: 'de-DE', fr: 'fr-FR', es: 'es-ES', it: 'it-IT', nl: 'nl-NL', pl: 'pl-PL', pt: 'pt-PT', fi: 'fi-FI' };
+  const srcName = () => S.srcLang === 'auto' ? 'whatever language is spoken' : LANG_NAMES[S.srcLang];
+  const dstName = () => LANG_NAMES[S.dstLang] || 'English';
+  const srLang = () => SR_CODES[S.srcLang] || 'da-DK';
+  function applyLangs(changed) {
+    for (const id of ['srcLang', 'srcStart', 'srcQuick']) $(id).value = S.srcLang;
+    for (const id of ['dstLang', 'dstStart', 'dstQuick']) $(id).value = S.dstLang;
+    const sc = S.srcLang === 'auto' ? 'AUTO' : S.srcLang.toUpperCase(), dc = S.dstLang.toUpperCase();
+    $('tagSrc').textContent = sc; $('tagDst').textContent = dc; $('qLang').textContent = `${sc === 'AUTO' ? 'Auto' : sc}→${dc}`;
+    if (!changed) return;
+    wordCache.clear && wordCache.clear();
+    if (LV.rec) { try { LV.rec.lang = srLang(); LV.rec.stop(); } catch (er) {} }                 // free listening restarts in the new language
+    if (rec) { try { rec.lang = srLang(); rec.stop(); } catch (er) {} }
+    if (S.engine === 'live' && LV.on) { const old = LV.ws; LV.ws = null; try { old && old.close(); } catch (er) {} geminiConnect(); }   // Gemini: new target language
+    if (IN.cur) { IN.cur = null; IN.curText = ''; }                                              // ⚡ re-read and re-translate the current subtitle
+  }
+  function setLangs(src, dst) {
+    if (src) { S.srcLang = src; store.set('srcLang', src); }
+    if (dst) { S.dstLang = dst; store.set('dstLang', dst); }
+    applyLangs(true);
+  }
+  for (const [a, b] of [['srcLang', 'dstLang'], ['srcStart', 'dstStart'], ['srcQuick', 'dstQuick']]) {
+    $(a).onchange = e => setLangs(e.target.value, null);
+    $(b).onchange = e => setLangs(null, e.target.value);
+  }
+  $('qLang').onclick = () => { $('langCard').style.display = 'block'; };
+  $('langDone').onclick = () => { $('langCard').style.display = 'none'; quickToast(`${LANG_NAMES[S.srcLang] === 'auto' ? 'Any language' : LANG_NAMES[S.srcLang]} → ${dstName()}`); };
+  $('langSwap').onclick = () => { if (S.srcLang === 'auto') { quickToast('Pick the TV language first'); return; } setLangs(S.dstLang, S.srcLang); };
+
+  // ---------- clear ----------
+  let undoConv = null, undoTimer = 0;
+  function clearConversation() {
+    undoConv = { conv: conv.slice(), en: sEn.innerHTML, da: sDa.innerHTML };
+    conv.length = 0; shown.length = 0; roster = {}; lastDaText = ''; sEn.innerHTML = ''; sDa.innerHTML = '';
+    if (typeof IN !== 'undefined') { IN.cur = null; IN.curText = ''; }
+    if (typeof LV !== 'undefined') LV.cur = null;
+    clearHL && clearHL();
+    const t = document.createElement('button'); t.className = 'jump'; t.textContent = 'Cleared · Undo';
+    t.style.top = ($('quick').getBoundingClientRect().top - 44) + 'px';
+    t.onclick = () => { if (!undoConv) return; conv.push(...undoConv.conv); sEn.innerHTML = undoConv.en; sDa.innerHTML = undoConv.da; undoConv = null; t.remove(); };
+    document.body.appendChild(t);
+    clearTimeout(undoTimer); undoTimer = setTimeout(() => { t.remove(); undoConv = null; }, 4000);
+  }
+  $('qClear').onclick = clearConversation;
+  $('clearconv').onclick = () => { $('settings').style.display = 'none'; clearConversation(); };
   $('exportbank').onclick = async () => {
     const txt = Object.values(bank).map(b => `${b.da}\t${b.en}\t${b.ctxDa || ''}`).join('\n');
     try { await navigator.clipboard.writeText(txt); $('exportbank').textContent = 'Copied!'; }
@@ -922,12 +978,13 @@
     finally { clearTimeout(t); }
   }
   // ---------- AI ----------
-  const SYSTEM = `You are a live subtitle translator and dialogue tracker. Each image is a phone-camera photo of a TV showing Danish programming with Danish subtitles.
+  const fillLang = t => t.replace(/\{SRC\}/g, S.srcLang === 'auto' ? 'foreign-language' : LANG_NAMES[S.srcLang]).replace(/\{DST\}/g, dstName());
+  const SYSTEM_T = `You are a live subtitle translator and dialogue tracker. Each image is a phone-camera photo of a TV showing {SRC} programming with subtitles.
 
 1. Find the dialogue subtitles (usually 1-2 lines of white or yellow text near the bottom of the TV picture; the TV may be small, tilted or off-centre). Ignore logos, clocks, tickers, menus and any other text that is not dialogue.
 2. Split the subtitle into speaker lines. A leading dash usually marks a new speaker. A sentence wrapped over two lines by one speaker is ONE line.
 3. Decide who says each line, as best you can, from who is on screen, who appears to be talking, the dashes and the conversation so far. Tag speakers M (man) or W (woman) plus a number in order of first appearance: M1, M2, W1, W2. Reuse the roster tags for people you have seen before. If you cannot tell at all, use "?".
-4. Translate each line into natural, idiomatic English.
+4. Translate each line into natural, idiomatic {DST}.
 5. Word links in "g": one group number per space-separated word of "da", then "|", then one per space-separated word of "en". Words that translate each other share a number (1, 2, 3...); a group can span several words (e.g. "har lyst til" = "want to"). Use 0 for words with no counterpart. Drop leading dialogue dashes.
 
 Reply with compact JSON only, no other text:
@@ -935,7 +992,7 @@ Reply with compact JSON only, no other text:
 "roster": ONLY speakers that are new in this frame, with a 3-6 word visual description; omit it otherwise.
 Also give "box": [left, top, right, bottom] of the subtitle text as fractions (0-1) of the image.
 If no subtitle is visible or it is unreadable, reply exactly: {"lines":[]}`;
-  const READ_SYSTEM = `The image is a strip cut from a phone photo of a TV, showing Danish dialogue subtitles (1-2 lines). Read them and translate into natural English.
+  const READ_SYSTEM_T = `The image is a strip cut from a phone photo of a TV, showing {SRC} dialogue subtitles (1-2 lines). Read them and translate into natural {DST}.
 Split speakers on leading dashes. "spk": reuse the tag of the person speaking if clear from context (M1, W1...), otherwise "?".
 "g": one group number per space-separated word of "da", "|", one per word of "en"; words that translate each other share a number, 0 = no counterpart.
 Reply with compact JSON only: {"lines":[{"spk":"W1","da":"Hvor har du været?","en":"Where have you been?","g":"1 2 3 2|1 2 3 2"}]}
@@ -949,7 +1006,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
       headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: S.model, max_tokens: read ? 250 : 450, system: read ? READ_SYSTEM : SYSTEM,
+        model: S.model, max_tokens: read ? 250 : 450, system: fillLang(read ? READ_SYSTEM_T : SYSTEM_T),
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
           { type: 'text', text: ctx } ] }]
@@ -1009,7 +1066,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
     const r = await fetchT(url, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: read ? READ_SYSTEM : SYSTEM }] },
+        systemInstruction: { parts: [{ text: fillLang(read ? READ_SYSTEM_T : SYSTEM_T) }] },
         contents: [{ role: 'user', parts: [{ inline_data: { mime_type: 'image/jpeg', data: b64 } }, { text: read ? readContext() : contextText() }] }],
         generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 450, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 } }
       })
@@ -1027,12 +1084,12 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
 
   // ---------- Free: on-phone text reader + Google Translate ----------
   async function googleTranslateAuto(text) {
-    const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=' + encodeURIComponent(text);
+    const u = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${S.dstLang}&dt=t&q=` + encodeURIComponent(text);
     const r = await fetchT(u, {}, 6000); if (!r.ok) throw new Error('Google Translate ' + r.status);
     const j = await r.json(); return { en: j[0].map(x => x[0]).join(''), src: j[2] || '' };
   }
   async function googleTranslate(text) {
-    const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=da&tl=en&dt=t&q=' + encodeURIComponent(text);
+    const u = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${S.srcLang}&tl=${S.dstLang}&dt=t&q=` + encodeURIComponent(text);
     const r = await fetchT(u, {}, 6000); if (!r.ok) throw new Error('Google Translate ' + r.status);
     const j = await r.json(); return j[0].map(x => x[0]).join('');
   }
@@ -1640,7 +1697,7 @@ If there is no subtitle text, reply exactly: {"lines":[]}`;
   function startHearing() {
     if (!SR) { S.hear = false; store.set('hear', false); quickUI(); quickToast('This browser can\'t listen (try Chrome)'); return; }
     if (rec) return;
-    rec = new SR(); rec.lang = S.spokenLang; rec.continuous = true; rec.interimResults = false;
+    rec = new SR(); rec.lang = srLang(); rec.continuous = true; rec.interimResults = false;
     rec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++)
         if (e.results[i].isFinal) { heard.push({ t: Date.now(), text: e.results[i][0].transcript }); if (heard.length > 200) heard.shift(); }
@@ -2010,8 +2067,8 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   // Setup layouts to try, in order. The first one follows Google's official API definition (transcription settings at the
   // top of "setup"); the others cover the layout in Google's translation guide, the older API version, and finally the
   // general live model instructed to act as an interpreter. The one that works is remembered.
-  const TR = { targetLanguageCode: 'en', echoTargetLanguage: true };   // true: also transcribe speech Google thinks is already English
-  const INTERP = 'You are a live interpreter for someone watching TV. Translate everything you hear, in any language, into English, sentence by sentence, as quickly as possible. Never answer questions, comment or add anything: only translate. If what you hear is already English, repeat it in English.';
+  const TR = { targetLanguageCode: 'en', echoTargetLanguage: true };   // target filled in at connect time; echo: also transcribe speech already in the target language
+  const INTERP = 'You are a live interpreter for someone watching TV. Translate everything you hear, in any language, into {DST}, sentence by sentence, as quickly as possible. Never answer questions, comment or add anything: only translate. If what you hear is already {DST}, repeat it.';
   const VARIANTS = [
     { name: 'translate', ver: 'v1beta', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], translationConfig: TR }, inputAudioTranscription: {}, outputAudioTranscription: {} } },
     { name: 'translate (guide layout)', ver: 'v1beta', setup: { model: 'models/gemini-3.5-live-translate-preview', generationConfig: { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {}, translationConfig: TR } } },
@@ -2029,6 +2086,8 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   }
   function geminiConnect() {
     const v = VARIANTS[variantIdx];
+    TR.targetLanguageCode = S.dstLang;
+    if (v.setup.systemInstruction) v.setup.systemInstruction.parts[0].text = INTERP.replace(/\{DST\}/g, dstName());
     const ws = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.${v.ver}.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(S.gkey)}`);
     const prev = LV.ws; LV.ws = ws; LV.ready = false; LV.variant = v.name;
     let gotSetup = false;
@@ -2116,7 +2175,7 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
   // --- free live: the phone's own Danish speech recognition + Google Translate ---
   function startFreeLive() {
     if (!SR) { setStatus('This browser has no speech recognition. Use Chrome, or the Gemini live mode.'); return; }
-    const rec = new SR(); LV.rec = rec; rec.lang = S.spokenLang; rec.continuous = true; rec.interimResults = true;
+    const rec = new SR(); LV.rec = rec; rec.lang = srLang(); rec.continuous = true; rec.interimResults = true;
     let base = '';
     rec.onresult = e => {
       if (!listening()) return;
@@ -2303,14 +2362,14 @@ Reply with JSON only: {"notable":true|false,"type":"idiom|joke|culture|reference
     if (S.polish && S.key) aiPolish(line, my);
   }
   // optional: a tiny text-only AI request upgrades the English and adds tap-to-match word links
-  const POLISH_SYS = `Translate this Danish TV subtitle into natural, idiomatic English. Then link words: "g" = one group number per space-separated word of the Danish, "|", one per space-separated word of your English; words that translate each other share a number, 0 = no counterpart.
+  const POLISH_SYS_T = `Translate this {SRC} TV subtitle into natural, idiomatic {DST}. Then link words: "g" = one group number per space-separated word of the Danish, "|", one per space-separated word of your English; words that translate each other share a number, 0 = no counterpart.
 Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   async function aiPolish(line, my) {
     try {
       const prev = conv.slice(-3, -1).map(l => l.daText || l.da.map(t => t[0]).join(' ')).join(' / ');
       const r = await fetchT('https://api.anthropic.com/v1/messages', { method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': S.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 200, system: POLISH_SYS, messages: [{ role: 'user', content: `Earlier: ${prev || '-'}\nSubtitle: ${line.daText}` }] }) }, 8000);
+        body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 200, system: fillLang(POLISH_SYS_T), messages: [{ role: 'user', content: `Earlier: ${prev || '-'}\nSubtitle: ${line.daText}` }] }) }, 8000);
       if (!r.ok) return;
       const j = await r.json(); addCost(costOf(j.usage, 'claude-haiku'));
       const m = ((j.content || [])[0] || {}).text.match(/\{[\s\S]*\}/); if (!m || my !== line.my) return;
@@ -2374,6 +2433,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     }
   }
 
+  applyLangs(false);
   // ---------- start ----------
   const KEYHELP = {
     claude: ['Paste your Anthropic API key (sk-ant-...)', 'Get one at <a href="https://console.anthropic.com/settings/keys">console.anthropic.com</a>. About $1 per hour of TV. It stays on this phone only.'],
