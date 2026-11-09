@@ -187,11 +187,12 @@
   <label>2. Keep it in sync</label>
   <div class="note">Point the camera at the TV: as soon as one subtitle is recognised the app follows the episode, and each line appears the moment it starts. If a line comes too early or late:</div>
   <div class="row" style="margin-top:8px"><button class="big" id="sfNudgeM">Earlier −0.5 s</button><button class="big" id="sfNudgeP">Later +0.5 s</button></div>
+  <div class="row" style="margin-top:8px"><button class="big" id="sfFromStart">▶ I'm starting the episode now (from 0:00)</button></div>
   <input type="text" id="sfPickQ" placeholder="Or type words you just heard to sync by hand" style="width:100%;margin-top:8px" autocomplete="off">
   <div id="sfPick"></div>
   <label>Or load files you already have (.srt / .vtt)</label>
-  <div class="note">TV language:</div><input type="file" id="sfFileSrc" accept=".srt,.vtt,.txt">
-  <div class="note">My language:</div><input type="file" id="sfFileDst" accept=".srt,.vtt,.txt">
+  <div class="note">TV language:</div><input type="file" id="sfFileSrc">
+  <div class="note">My language:</div><input type="file" id="sfFileDst">
   <label>OpenSubtitles account (free)</label>
   <div class="note">Make a free account at opensubtitles.com, then create an API key under your profile → API consumers. Without logging in you get 5 downloads a day, with login 20.</div>
   <input type="password" id="sfKey" placeholder="OpenSubtitles API key" style="width:100%;margin-top:8px" autocomplete="off">
@@ -2480,6 +2481,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   // on the app knows the playback position: each translated line appears the moment its subtitle starts.
   const SF = { src: [], dst: [], map: null, tr: new Map(), anchor: null, lastIdx: -1, pending: null, confirmT: 0, srcName: '', dstName: '' };
   const OS_BASE = 'https://api.opensubtitles.com/api/v1';
+  const osBase = () => SF.base || OS_BASE;
   const OS_LANG = { pt: 'pt-pt,pt-br', no: 'no' };
   function parseSubs(txt) {
     const cues = [], t = String(txt).replace(/\r/g, '').replace(/^﻿/, '');
@@ -2614,16 +2616,22 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     return h;
   }
   async function osLogin() {
-    if (!S.osUser || !S.osPass || SF.token) return;
-    const r = await fetchT(OS_BASE + '/login', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ username: S.osUser, password: S.osPass }) }, 10000);
-    if (r.ok) { const j = await r.json(); SF.token = j.token; } else sfMsg('OpenSubtitles login failed (' + r.status + '), continuing without login (5 downloads a day).');
+    if (SF.token) return;
+    if (!S.osUser || !S.osPass) throw new Error('OpenSubtitles needs your username and password to download (fill them in at the bottom of this panel).');
+    const r = await fetchT('https://api.opensubtitles.com/api/v1/login', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ username: S.osUser, password: S.osPass }) }, 12000);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.token) throw new Error('OpenSubtitles login failed: ' + (j.message || r.status) + '. Check username/password (not your email).');
+    SF.token = j.token;
+    if (j.base_url) SF.base = 'https://' + String(j.base_url).replace(/^https?:\/\//, '').replace(/\/.*$/, '') + '/api/v1';
   }
   async function osSearch(title, season, episode, lang) {
     const q = { languages: OS_LANG[lang] || lang, order_by: 'download_count', query: title.toLowerCase().trim() };
     if (season) q.season_number = season; if (episode) q.episode_number = episode;
-    const qs = Object.keys(q).sort().map(k => k + '=' + encodeURIComponent(q[k])).join('&');
-    const r = await fetchT(OS_BASE + '/subtitles?' + qs, { headers: osHeaders(false) }, 12000);
-    if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'OpenSubtitles refused the API key' : 'OpenSubtitles search failed (' + r.status + ')');
+    const qs = Object.keys(q).sort().map(k => k + '=' + encodeURIComponent(String(q[k]).toLowerCase()).replace(/%20/g, '+')).join('&');
+    let r;
+    try { r = await fetchT(osBase() + '/subtitles?' + qs, { headers: osHeaders(false) }, 12000); }
+    catch (e) { throw new Error('Could not reach OpenSubtitles (' + e.message + '). Check your internet.'); }
+    if (!r.ok) { const t = (await r.text().catch(() => '')).slice(0, 120); throw new Error((r.status === 401 || r.status === 403 ? 'OpenSubtitles refused the API key: ' : 'OpenSubtitles search failed (' + r.status + '): ') + t); }
     const j = await r.json();
     return (j.data || []).filter(d => d.attributes && d.attributes.files && d.attributes.files.length).map(d => {
       const a = d.attributes, f = a.feature_details || {};
@@ -2633,12 +2641,16 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   }
   async function osDownload(fileId) {
     await osLogin();
-    const r = await fetchT(OS_BASE + '/download', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ file_id: fileId, sub_format: 'srt' }) }, 12000);
+    const r = await fetchT(osBase() + '/download', { method: 'POST', headers: osHeaders(true), body: JSON.stringify({ file_id: fileId, sub_format: 'srt' }) }, 12000);
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.link) throw new Error(j.message || ('Download refused (' + r.status + ')'));
+    if (r.status === 401) { SF.token = null; throw new Error('OpenSubtitles says the login expired. Tap the file again.'); }
+    if (!r.ok || !j.link) throw new Error('OpenSubtitles: ' + (j.message || ('download refused (' + r.status + ')')) + (j.reset_time ? ' (resets in ' + j.reset_time + ')' : ''));
     if (typeof j.remaining === 'number') SF.remaining = j.remaining;
-    const f = await fetchT(j.link, {}, 15000);                    // the file link takes no extra headers
-    return f.text();
+    let f;
+    try { f = await fetchT(j.link, {}, 15000); }                   // the file link takes no extra headers
+    catch (e) { throw new Error('Could not fetch the file from OpenSubtitles (' + e.message + ')'); }
+    if (!f.ok) throw new Error('OpenSubtitles file link answered ' + f.status);
+    return decodeSub(await f.arrayBuffer());
   }
 
   // --- panel ---
@@ -2652,7 +2664,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     const sync = !n ? 'Load subtitles first.' : !SF.anchor ? 'Waiting to sync: point the camera at the TV until a subtitle is recognised, or pick the current line below.'
       : `Synced ✓  ${Math.floor(p / 60)}:${String(Math.floor(p % 60)).padStart(2, '0')}${SF.anchor.frozen ? ' (paused)' : ''}`;
     $('sfState').textContent = files + '\n' + sync + (typeof SF.remaining === 'number' ? `\nDownloads left today: ${SF.remaining}` : '');
-    $('qSub').style.display = S.engine === 'subfile' ? '' : 'none';
+    $('qSub').style.display = S.engine === 'subfile' ? '' : 'none'; $('qSub').textContent = cues().length ? (SF.anchor ? '📄✓' : '📄…') : '📄';
     $('qSub').classList.toggle('on', !!SF.anchor);
   }
   setInterval(() => { if ($('subfind').style.display === 'block') sfUI(); }, 500);
@@ -2673,7 +2685,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   }
   function loadText(txt, slot, name) {
     const cs = parseSubs(txt);
-    if (cs.length < 5) { sfMsg('That file has no readable subtitles.'); return; }
+    if (cs.length < 5) { sfMsg(`That file has no readable subtitles (found ${cs.length} lines). Is it an .srt or .vtt file?`); return; }
     if (slot === 'src') { SF.src = cs; SF.srcName = name; } else { SF.dst = cs; SF.dstName = name; }
     SF.tr.clear(); SF.lastIdx = -1; alignFiles(); sfUI(); sfMsg(`Loaded ${cs.length} lines.`);
     if (S.engine === 'subfile' && !IN.loopOn && video.videoWidth) instantLoop();
@@ -2686,18 +2698,28 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     sfMsg('Searching…');
     try {
       const [a, b] = await Promise.all([osSearch(title, se, ep, srcL), S.dstLang !== srcL ? osSearch(title, se, ep, S.dstLang) : Promise.resolve([])]);
-      SF.found = { src: a, dst: b };
+      SF.found = { src: a, dst: b }; SF.foundFor = title;
       renderResults(a, 'src'); renderResults(b, 'dst');
       sfMsg(a.length || b.length ? 'Tap a file to load it, or "Load best match".' : 'Nothing found. Check the spelling, or try without season/episode.');
     } catch (e) { sfMsg(e.message); }
   };
   $('sfBest').onclick = async () => {
-    if (!SF.found) { await $('sfSearch').onclick(); if (!SF.found) return; }
+    if (!SF.found || SF.foundFor !== $('sfTitle').value.trim()) { await $('sfSearch').onclick(); if (!SF.found) return; }
+    if (!SF.found.src.length && !SF.found.dst.length) return;
     if (SF.found.src[0]) await loadResult(SF.found.src[0], 'src');
-    if (SF.found.dst[0]) await loadResult(SF.found.dst[0], 'dst');
+    if (SF.found.dst[0] && $('sfMsg').textContent.startsWith('Loaded')) await loadResult(SF.found.dst[0], 'dst');
   };
-  $('sfFileSrc').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => loadText(t, 'src', f.name)); };
-  $('sfFileDst').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => loadText(t, 'dst', f.name)); };
+  function decodeSub(buf) {
+    const u = new Uint8Array(buf);
+    if (u[0] === 0xFF && u[1] === 0xFE) return new TextDecoder('utf-16le').decode(u);
+    if (u[0] === 0xFE && u[1] === 0xFF) return new TextDecoder('utf-16be').decode(u);
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(u); }
+    catch (e) { return new TextDecoder('windows-1252').decode(u); }        // older Danish files (æ ø å as single bytes)
+  }
+  const loadFile = (slot) => e => { const f = e.target.files[0]; if (!f) return; sfMsg('Reading ' + f.name + '…');
+    f.arrayBuffer().then(b => loadText(decodeSub(b), slot, f.name)).catch(er => sfMsg('Could not read the file: ' + er.message)); e.target.value = ''; };
+  $('sfFileSrc').onchange = loadFile('src');
+  $('sfFileDst').onchange = loadFile('dst');
   $('sfKey').value = S.osKey || ''; $('sfUser').value = S.osUser || ''; $('sfPass').value = S.osPass || '';
   $('sfKey').onchange = e => { S.osKey = e.target.value.trim(); store.set('osKey', S.osKey); };
   $('sfUser').onchange = e => { S.osUser = e.target.value.trim(); store.set('osUser', S.osUser); SF.token = null; };
@@ -2705,6 +2727,10 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
   $('sfNudgeM').onclick = () => { const p = position(); if (p !== null) { setAnchor(p - 0.5, 'nudge'); SF.lastIdx = -1; } };
   $('sfNudgeP').onclick = () => { const p = position(); if (p !== null) { setAnchor(p + 0.5, 'nudge'); SF.lastIdx = -1; } };
   $('sfClose').onclick = () => { $('subfind').style.display = 'none'; };
+  $('sfFromStart').onclick = () => { if (!cues().length) { sfMsg('Load subtitles first.'); return; } setAnchor(0, 'start'); SF.lastIdx = -1; $('subfind').style.display = 'none'; quickToast('Following from 0:00'); };
+  setInterval(() => { if (S.engine === 'subfile' && live) { const st = $('status').textContent;
+    if (!cues().length) { if (!st.startsWith('📄')) setStatus('📄 No subtitles loaded: tap 📄'); }
+    else if (!SF.anchor) setStatus('📄 Loaded. Waiting to sync: point at a subtitle, or tap 📄'); else if (st.startsWith('📄')) setStatus(''); } }, 700);
   $('qSub').onclick = () => { $('subfind').style.display = 'block'; sfUI(); };
   // pick the current line by hand (works without the camera)
   $('sfPickQ').oninput = () => {
@@ -2799,7 +2825,7 @@ Reply with JSON only: {"en":"...","g":"1 2 3|1 2 3"}`;
     await step('Google Translate', async () => { const t = await googleTranslate('Hvor har du været?'); return '✓ "' + t + '"'; });
     await step('OpenSubtitles search', async () => {
       if (!S.osKey) return '✗ no OpenSubtitles API key saved (📄 panel)';
-      const r = await fetchT(OS_BASE + '/subtitles?languages=da&query=borgen', { headers: osHeaders(false) }, 12000);
+      const r = await fetchT(osBase() + '/subtitles?languages=da&order_by=download_count&query=borgen', { headers: osHeaders(false) }, 12000);
       const body = (await r.text()).slice(0, 160);
       return (r.ok ? '✓ ' : '✗ ') + 'status ' + r.status + ' ' + body;
     });
